@@ -176,7 +176,7 @@ task.spawn(function()
                                 tool.MousePos.Value = TargetPos
                             end
                         end
-                     pcall)
+                     end)
                 end
             end
         end
