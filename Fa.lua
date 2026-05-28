@@ -14,6 +14,25 @@ old = hookfunction(task.delay, function(t, f, ...)
     return old(t, f, ...)
 end)
 
+pcall(function()
+    game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("Buso")
+end)
+
+task.spawn(function()
+    while task.wait(0.5) do
+        -- Lấy Character chuẩn từ Workspace.Characters hoặc LocalPlayer
+        local char = workspace:FindFirstChild("Characters") and workspace.Characters:FindFirstChild(LocalPlayer.Name) or LocalPlayer.Character
+        if char and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 then
+            -- Nếu trong Character chưa có thư mục/value HasBuso thì gọi Remote bật
+            if not char:FindFirstChild("HasBuso") then
+                pcall(function()
+                    game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("Buso")
+                end)
+            end
+        end
+    end
+end)
+
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local VIM = game:GetService("VirtualInputManager")
