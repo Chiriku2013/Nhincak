@@ -8,10 +8,10 @@ old = hookfunction(task.delay, function(t, f, ...)
     local tool = char and char:FindFirstChildOfClass("Tool")
     if tool then
         local isGun = (tool:GetAttribute("WeaponType") == "Gun") or (tool.ToolTip == "Gun")
-        if isGun then return old(t, f, ...) end
+        if isGun and old then return old(t, f, ...) end
     end
-    if t > 0.1 then return old(0, f, ...) end
-    return old(t, f, ...)
+    if t > 0.1 and old then return old(0, f, ...) end
+    if old then return old(t, f, ...) end
 end)
 
 pcall(function()
@@ -106,13 +106,13 @@ local function FastAttack()
     end)
 end
 
--- [1. QUÉT MỤC TIÊU - ĐÃ FIX KẸT TARGET]
+-- [1. QUÉT MỤC TIÊU - TỰ ĐỘNG UPDATE & SẮP XẾP THEO CON GẦN NHẤT]
 task.spawn(function()
     while true do
         task.wait(0.1)
         local char = LocalPlayer.Character
         local root = char and char:FindFirstChild("HumanoidRootPart")
-        local targets = {} -- Luôn reset bảng tạm ở mỗi vòng quét mới
+        local targets = {} 
         
         if root then
             local folders = {workspace:FindFirstChild("Enemies"), workspace:FindFirstChild("Characters")}
@@ -128,8 +128,18 @@ task.spawn(function()
                     end
                 end
             end
+            
+            -- THUẬT TOÁN ĐỊNH VỊ: Sắp xếp bảng để con gần nhất luôn nằm ở Index 1
+            table.sort(targets, function(a, b)
+                local aPart = a:FindFirstChild("HumanoidRootPart") or a:FindFirstChild("UpperTorso")
+                local bPart = b:FindFirstChild("HumanoidRootPart") or b:FindFirstChild("UpperTorso")
+                if aPart and bPart then
+                    return (aPart.Position - root.Position).Magnitude < (bPart.Position - root.Position).Magnitude
+                end
+                return false
+            end)
         end
-        AllTargets = targets -- Nếu không tìm thấy root hoặc không có quái, AllTargets sẽ tự động rỗng chứ không kẹt target cũ
+        AllTargets = targets 
     end
 end)
 
@@ -148,7 +158,7 @@ task.spawn(function()
                 if tick() - lastClick > Cooldown then 
                     lastClick = tick()
                     pcall(function()
-                        local firstTarget = AllTargets[1]
+                        local firstTarget = AllTargets[1] -- Nhờ table.sort, đây luôn là con gần nhất
                         if firstTarget and firstTarget.Parent and firstTarget:FindFirstChild("Humanoid") and firstTarget.Humanoid.Health > 0 then
                             local TargetPos = firstTarget:GetPivot().Position
                             local ShootType = SpecialShoots[toolName] or "Normal"
@@ -168,7 +178,9 @@ task.spawn(function()
                                 local rx, ry = math.random(1, 5), math.random(1, 5)
                                 VIM:SendMouseButtonEvent(rx, ry, 0, true, game, 0)
                                 VIM:SendMouseButtonEvent(rx, ry, 0, false, game, 0)
-                                if tool:FindFirstChild("Activated") then tool.Activated:Fire() end
+                                
+                                local act = tool:FindFirstChild("Activated")
+                                if act and act:IsA("BindableEvent") then act:Fire() end
                                 tool:Activate()
                             end
 
@@ -176,7 +188,7 @@ task.spawn(function()
                                 tool.MousePos.Value = TargetPos
                             end
                         end
-                     end)
+                    end) -- FIX LỖI "pcall)" THÀNH "end)" Ở ĐÂY
                 end
             end
         end
@@ -196,6 +208,7 @@ repeat
 until Net and regHit and regAttack
 
 -- [[ BYPASS & HOOK SECTION - GIỮ NGUYÊN ]]
+local oldNM = nil
 local function ExtremeBypass(tool)
     pcall(function()
         if tool:IsA("Tool") then
@@ -203,13 +216,12 @@ local function ExtremeBypass(tool)
             tool:SetAttribute("LastAttack", 0)
             tool:SetAttribute("State", 0) 
             if not getgenv().Hooked then
-                local oldNM = nil
                 oldNM = hookmetamethod(game, "__namecall", function(self, ...)
                     local method = getnamecallmethod()
                     if method == "FireServer" and self.Name == "RE/RegisterAttack" then
-                        return oldNM(self, -math.huge)
+                        if oldNM then return oldNM(self, -math.huge) end
                     end
-                    return oldNM(self, ...)
+                    if oldNM then return oldNM(self, ...) end
                 end)
                 getgenv().Hooked = true
             end
@@ -277,7 +289,6 @@ task.spawn(function()
                         if #gunHitList > 0 then
                             regHit:FireServer(gunHitList[1][2], gunHitList, nil, nil, unbanID)
                             
-                            -- Gom toàn bộ vị trí quái lại bắn 1 lần duy nhất thay vì lặp FireServer bừa bãi gây lag mạng
                             if not isGuitar and shootGun and primaryPos then
                                 shootGun:FireServer(primaryPos, shootParts, unbanID)
                             end
