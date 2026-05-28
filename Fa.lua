@@ -20,10 +20,8 @@ end)
 
 task.spawn(function()
     while task.wait(0.5) do
-        -- Lấy Character chuẩn từ Workspace.Characters hoặc LocalPlayer
         local char = workspace:FindFirstChild("Characters") and workspace.Characters:FindFirstChild(LocalPlayer.Name) or LocalPlayer.Character
         if char and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 then
-            -- Nếu trong Character chưa có thư mục/value HasBuso thì gọi Remote bật
             if not char:FindFirstChild("HasBuso") then
                 pcall(function()
                     game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("Buso")
@@ -49,7 +47,6 @@ local SpecialShoots = {
 }
 local GunValidator = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Validator2")
 
--- Biến hỗ trợ lấy Upvalues để tính Validator
 local ShootFunction = nil
 pcall(function()
     ShootFunction = getupvalue(require(ReplicatedStorage.Controllers.CombatController).Attack, 9)
@@ -72,7 +69,6 @@ local function GetValidator2()
     v6 = v9 - v5 * v3
     v7 = v7 + 1
     
-    -- Cập nhật lại Upvalues để nhịp sau tính tiếp (Quan trọng)
     setupvalue(ShootFunction, 14, v5)
     setupvalue(ShootFunction, 12, v6)
     setupvalue(ShootFunction, 18, v7)
@@ -110,14 +106,15 @@ local function FastAttack()
     end)
 end
 
--- [1. QUÉT MỤC TIÊU - GIỮ NGUYÊN]
+-- [1. QUÉT MỤC TIÊU - ĐÃ FIX KẸT TARGET]
 task.spawn(function()
     while true do
         task.wait(0.1)
         local char = LocalPlayer.Character
         local root = char and char:FindFirstChild("HumanoidRootPart")
+        local targets = {} -- Luôn reset bảng tạm ở mỗi vòng quét mới
+        
         if root then
-            local targets = {}
             local folders = {workspace:FindFirstChild("Enemies"), workspace:FindFirstChild("Characters")}
             for _, folder in pairs(folders) do
                 if folder then
@@ -131,8 +128,8 @@ task.spawn(function()
                     end
                 end
             end
-            AllTargets = targets
         end
+        AllTargets = targets -- Nếu không tìm thấy root hoặc không có quái, AllTargets sẽ tự động rỗng chứ không kẹt target cũ
     end
 end)
 
@@ -151,35 +148,35 @@ task.spawn(function()
                 if tick() - lastClick > Cooldown then 
                     lastClick = tick()
                     pcall(function()
-                        local TargetPos = AllTargets[1]:GetPivot().Position
-                        local ShootType = SpecialShoots[toolName] or "Normal"
+                        local firstTarget = AllTargets[1]
+                        if firstTarget and firstTarget.Parent and firstTarget:FindFirstChild("Humanoid") and firstTarget.Humanoid.Health > 0 then
+                            local TargetPos = firstTarget:GetPivot().Position
+                            local ShootType = SpecialShoots[toolName] or "Normal"
 
-                        -- Nếu là súng cần Method riêng (Guitar, Bazooka, Dragonstorm)
-                        if ShootType ~= "Normal" then
-                            local v9, v7 = GetValidator2()
-                            if v9 then GunValidator:FireServer(v9, v7) end
-                            
-                            if ShootType == "TAP" and tool:FindFirstChild("RemoteEvent") then
-                                tool.RemoteEvent:FireServer("TAP", TargetPos)
-                            elseif ShootType == "Position" then
-                                game:GetService("ReplicatedStorage").Modules.Net["RE/ShootGunEvent"]:FireServer(TargetPos)
-                            elseif ShootType == "Overheat" then
-                                -- Logic đặc biệt cho Dragonstorm nếu cần (hiện tại gọi Position tương tự)
-                                game:GetService("ReplicatedStorage").Modules.Net["RE/ShootGunEvent"]:FireServer(TargetPos)
+                            if ShootType ~= "Normal" then
+                                local v9, v7 = GetValidator2()
+                                if v9 then GunValidator:FireServer(v9, v7) end
+                                
+                                if ShootType == "TAP" and tool:FindFirstChild("RemoteEvent") then
+                                    tool.RemoteEvent:FireServer("TAP", TargetPos)
+                                elseif ShootType == "Position" then
+                                    game:GetService("ReplicatedStorage").Modules.Net["RE/ShootGunEvent"]:FireServer(TargetPos)
+                                elseif ShootType == "Overheat" then
+                                    game:GetService("ReplicatedStorage").Modules.Net["RE/ShootGunEvent"]:FireServer(TargetPos)
+                                end
+                            else
+                                local rx, ry = math.random(1, 5), math.random(1, 5)
+                                VIM:SendMouseButtonEvent(rx, ry, 0, true, game, 0)
+                                VIM:SendMouseButtonEvent(rx, ry, 0, false, game, 0)
+                                if tool:FindFirstChild("Activated") then tool.Activated:Fire() end
+                                tool:Activate()
                             end
-                        else
-                            -- SÚNG THƯỜNG: DÙNG VIM NHƯ LOGIC CŨ
-                            local rx, ry = math.random(1, 5), math.random(1, 5)
-                            VIM:SendMouseButtonEvent(rx, ry, 0, true, game, 0)
-                            VIM:SendMouseButtonEvent(rx, ry, 0, false, game, 0)
-                            if tool:FindFirstChild("Activated") then tool.Activated:Fire() end
-                            tool:Activate()
-                        end
 
-                        if tool:FindFirstChild("MousePos") then
-                            tool.MousePos.Value = TargetPos
+                            if tool:FindFirstChild("MousePos") then
+                                tool.MousePos.Value = TargetPos
+                            end
                         end
-                    end)
+                     pcall)
                 end
             end
         end
@@ -220,7 +217,7 @@ local function ExtremeBypass(tool)
     end)
 end
 
--- [3. LOGIC TẤN CÔNG LAN (GIGA SPEED - GIỮ NGUYÊN 100% NHỊP ĐỘ)]
+-- [3. LOGIC TẤN CÔNG LAN (GIGA SPEED - ĐÃ TỐI ƯU PING SÚNG LAN)]
 task.spawn(function()
     while true do
         task.wait() 
@@ -246,8 +243,10 @@ task.spawn(function()
                         local fullHitList = {}
                         for j = 1, math.min(#AllTargets, 10) do
                             local monster = AllTargets[j]
-                            local part = monster:FindFirstChild("UpperTorso") or monster:FindFirstChild("Head")
-                            if part then table.insert(fullHitList, {monster, part}) end
+                            if monster and monster.Parent and monster:FindFirstChild("Humanoid") and monster.Humanoid.Health > 0 then
+                                local part = monster:FindFirstChild("UpperTorso") or monster:FindFirstChild("Head")
+                                if part then table.insert(fullHitList, {monster, part}) end
+                            end
                         end
                         if #fullHitList > 0 then
                             regAttack:FireServer(-math.huge)
@@ -258,20 +257,31 @@ task.spawn(function()
                             tool:Activate()
                         end
                     else
-                        -- LOGIC SÚNG LAN (GIỮ NGUYÊN)
+                        -- LOGIC SÚNG LAN (ĐÃ FIX GIẢM PING)
                         local gunHitList = {}
+                        local shootParts = {}
+                        local primaryPos = nil
+
                         for j = 1, math.min(#AllTargets, 10) do
                             local monster = AllTargets[j]
-                            local tPart = monster:FindFirstChild("Head") or monster:FindFirstChild("HumanoidRootPart")
-                            if tPart then
-                                table.insert(gunHitList, {monster, tPart})
-                                if not isGuitar and shootGun then
-                                    shootGun:FireServer(tPart.Position, {tPart}, unbanID)
+                            if monster and monster.Parent and monster:FindFirstChild("Humanoid") and monster.Humanoid.Health > 0 then
+                                local tPart = monster:FindFirstChild("Head") or monster:FindFirstChild("HumanoidRootPart")
+                                if tPart then
+                                    table.insert(gunHitList, {monster, tPart})
+                                    table.insert(shootParts, tPart)
+                                    if not primaryPos then primaryPos = tPart.Position end
                                 end
                             end
                         end
+
                         if #gunHitList > 0 then
                             regHit:FireServer(gunHitList[1][2], gunHitList, nil, nil, unbanID)
+                            
+                            -- Gom toàn bộ vị trí quái lại bắn 1 lần duy nhất thay vì lặp FireServer bừa bãi gây lag mạng
+                            if not isGuitar and shootGun and primaryPos then
+                                shootGun:FireServer(primaryPos, shootParts, unbanID)
+                            end
+
                             if isGuitar then
                                 local remote = tool:FindFirstChild("RemoteEvent")
                                 if remote then remote:FireServer("TAP", gunHitList[1][2].Position, unbanID) end
