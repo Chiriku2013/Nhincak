@@ -38,7 +38,7 @@ local VIM = game:GetService("VirtualInputManager")
 local RANGE = 1000 
 local AllTargets = {}
 
--- [[ HỆ THỐNG VALIDATOR SÚNG & SPECIAL METHODS (GIỮ NGUYÊN) ]]
+-- [[ HỆ THỐNG VALIDATOR SÚNG & SPECIAL METHODS ]]
 local SpecialShoots = {
     ["Skull Guitar"] = "TAP", 
     ["Bazooka"] = "Position", 
@@ -76,17 +76,20 @@ local function GetValidator2()
     return math.floor(v9 / v4 * 16777215), v7
 end
 
--- [[ FIX KẸT FRAMEWORK: TỐI ƯU CÁCH GỌI KHÔNG DÙNG GETGC SPAM ]]
+-- [[ FIX KẸT FRAMEWORK: TỰ ĐỘNG LÀM MỚI KHI ĐỔI NHÂN VẬT ]]
 local CachedFramework = nil
+local LastCheckedChar = nil
+
 local function GetFramework()
-    -- Ưu tiên dùng require vì nó tức thời và không bị rò rỉ RAM gây giật (stutter)
-    pcall(function()
-        CachedFramework = require(LocalPlayer.PlayerScripts:WaitForChild("CombatFramework")).activeController
-    end)
+    local char = workspace:FindFirstChild("Characters") and workspace.Characters:FindFirstChild(LocalPlayer.Name) or LocalPlayer.Character
+    
+    if LastCheckedChar ~= char then
+        CachedFramework = nil
+        LastCheckedChar = char
+    end
     
     if CachedFramework then return CachedFramework end
     
-    -- Fallback lại getgc của ông nếu require lỗi (rất hiếm khi xảy ra)
     for _, v in pairs(getgc(true)) do
         if type(v) == "table" and rawget(v, "activeController") then
             CachedFramework = v.activeController
@@ -95,7 +98,7 @@ local function GetFramework()
     end
 end
 
--- [[ KỸ THUẬT ĐỤC FRAMEWORK TỐI ƯU (FIX FREEZE 100%) ]]
+-- [[ KỸ THUẬT ĐỤC FRAMEWORK TỐI ƯU ]]
 local function FastAttack()
     pcall(function()
         local ac = GetFramework()
@@ -104,10 +107,9 @@ local function FastAttack()
             ac.timeToNextAttack = 0
             ac.attacking = false
             ac.increment = 3
-            
-            -- FIX ĐIỂM CHẾT: Thay vì bắt game Play() animation liên tục gây crash logic, ta Stop() nó.
             if ac.animator and ac.animator.anims and ac.animator.anims.basic then
                 for _, v in pairs(ac.animator.anims.basic) do
+                    -- FIX 1: Đổi Play thành Stop để giải phóng Animator, cắt hoàn toàn lỗi đơ nhân vật
                     v:Stop() 
                 end
             end
@@ -115,7 +117,7 @@ local function FastAttack()
     end)
 end
 
--- [1. QUÉT MỤC TIÊU ĐỒNG BỘ CHUẨN VỊ TRÍ (GIỮ NGUYÊN)]
+-- [1. QUÉT MỤC TIÊU ĐỒNG BỘ CHUẨN VỊ TRÍ]
 task.spawn(function()
     while true do
         task.wait(0.1)
@@ -151,7 +153,7 @@ task.spawn(function()
     end
 end)
 
--- [2. AUTO CLICK + SPECIAL GUN LOGIC (GIỮ NGUYÊN)]
+-- [2. AUTO CLICK + SPECIAL GUN LOGIC]
 local lastClick = 0
 task.spawn(function()
     while true do
@@ -215,7 +217,7 @@ repeat
     end)
 until Net and regHit and regAttack
 
--- [[ BYPASS & HOOK SECTION (GIỮ NGUYÊN) ]]
+-- [[ BYPASS & HOOK SECTION ]]
 local oldNM = nil
 local function ExtremeBypass(tool)
     pcall(function()
@@ -237,7 +239,7 @@ local function ExtremeBypass(tool)
     end)
 end
 
--- [3. LOGIC TẤN CÔNG LAN: GIỮ NGUYÊN LUỒNG NHƯNG BỌC COOLDOWN CHỐNG KẸT]
+-- [3. LOGIC TẤN CÔNG LAN TỐI ƯU LUỒNG TRÁNH NGHẼN NETWORK]
 local lastAttackTick = 0
 local ATTACK_DELAY = 0.05 
 
@@ -250,10 +252,10 @@ task.spawn(function()
         
         if not regHit or not regAttack or not tool or not root or #AllTargets == 0 then continue end
 
-        -- CHỐNG KẸT & LOCK SERVER Ở ĐÂY: Vẫn chạy Heartbeat mượt nhưng chỉ cho phép xuất chiêu sau một độ trễ nhỏ
+        -- FIX 2: Bọc Cooldown mềm để ngăn việc gửi 180 luồng/giây lên server gây đơ mạng
         if tick() - lastAttackTick < ATTACK_DELAY then continue end
         lastAttackTick = tick()
-        ATTACK_DELAY = math.random(5, 9) / 100 -- Jitter ngẫu nhiên từ 0.05s đến 0.09s để lách Anti-Spam
+        ATTACK_DELAY = math.random(5, 8) / 100 -- Delay ngẫu nhiên từ 0.05s đến 0.08s để lách Anti-Spam
 
         ExtremeBypass(tool)
         FastAttack() 
@@ -262,14 +264,14 @@ task.spawn(function()
         local isGuitar = toolName:find("guitar")
         local isAnyGun = (tool:GetAttribute("WeaponType") == "Gun") or (tool.ToolTip == "Gun") or isGuitar
 
-        -- Giữ nguyên logic 3 luồng đồng bộ ổn định của ông
+        -- Giới hạn tối đa 3 luồng đồng bộ ổn định (GIỮ NGUYÊN)
         for i = 1, 3 do 
             task.spawn(function() 
                 local unbanID = tostring(LocalPlayer.UserId):sub(2,4)..tostring(coroutine.running()):sub(11,15)
                 pcall(function()
                     if not isAnyGun then
                         local fullHitList = {}
-                        -- Cố định số lượng tối đa 7 con/nhịp để không bị ngộp khi gửi 3 luồng
+                        -- Giới hạn list hit xuống 7 con để tối ưu byte data gửi đi (tránh packet loss)
                         for j = 1, math.min(#AllTargets, 7) do
                             local monster = AllTargets[j]
                             if monster and monster.Parent and monster:FindFirstChild("Humanoid") and monster.Humanoid.Health > 0 then
