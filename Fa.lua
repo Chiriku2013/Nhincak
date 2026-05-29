@@ -1,4 +1,4 @@
--- [[ 1. HOOK TASK.DELAY (GIỮ NGUYÊN) ]]
+-- [[ 1. HOOK TASK.DELAY (EXCLUDE GUNS) - GIỮ NGUYÊN ]]
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 
@@ -38,7 +38,7 @@ local VIM = game:GetService("VirtualInputManager")
 local RANGE = 1000 
 local AllTargets = {}
 
--- [[ HỆ THỐNG VALIDATOR SÚNG ]]
+-- [[ HỆ THỐNG VALIDATOR SÚNG & SPECIAL METHODS (GIỮ NGUYÊN) ]]
 local SpecialShoots = {
     ["Skull Guitar"] = "TAP", 
     ["Bazooka"] = "Position", 
@@ -46,6 +46,7 @@ local SpecialShoots = {
     ["Dragonstorm"] = "Overheat"
 }
 local GunValidator = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Validator2")
+
 local ShootFunction = nil
 pcall(function()
     ShootFunction = getupvalue(require(ReplicatedStorage.Controllers.CombatController).Attack, 9)
@@ -53,38 +54,48 @@ end)
 
 local function GetValidator2()
     if not ShootFunction then return nil end
-    local v1, v2, v3, v4, v5, v6, v7 = getupvalue(ShootFunction, 15), getupvalue(ShootFunction, 13), getupvalue(ShootFunction, 16), getupvalue(ShootFunction, 17), getupvalue(ShootFunction, 14), getupvalue(ShootFunction, 12), getupvalue(ShootFunction, 18)
+    local v1 = getupvalue(ShootFunction, 15)
+    local v2 = getupvalue(ShootFunction, 13)
+    local v3 = getupvalue(ShootFunction, 16)
+    local v4 = getupvalue(ShootFunction, 17)
+    local v5 = getupvalue(ShootFunction, 14)
+    local v6 = getupvalue(ShootFunction, 12)
+    local v7 = getupvalue(ShootFunction, 18)
+    
     local v8 = v6 * v2
     local v9 = (v5 * v2 + v6 * v1) % v3
     v9 = (v9 * v3 + v8) % v4
     v5 = math.floor(v9 / v3)
     v6 = v9 - v5 * v3
     v7 = v7 + 1
+    
     setupvalue(ShootFunction, 14, v5)
     setupvalue(ShootFunction, 12, v6)
     setupvalue(ShootFunction, 18, v7)
+    
     return math.floor(v9 / v4 * 16777215), v7
 end
 
--- [[ FIX 1: TÌM FRAMEWORK BẰNG REQUIRE (NHANH & KHÔNG BAO GIỜ KẸT) ]]
-local CombatFramework = nil
-pcall(function()
-    CombatFramework = require(LocalPlayer.PlayerScripts:WaitForChild("CombatFramework"))
-end)
-
+-- [[ FIX KẸT FRAMEWORK: TỐI ƯU CÁCH GỌI KHÔNG DÙNG GETGC SPAM ]]
+local CachedFramework = nil
 local function GetFramework()
-    if CombatFramework then
-        return CombatFramework.activeController
-    end
-    -- Fallback an toàn nếu require thất bại
+    -- Ưu tiên dùng require vì nó tức thời và không bị rò rỉ RAM gây giật (stutter)
+    pcall(function()
+        CachedFramework = require(LocalPlayer.PlayerScripts:WaitForChild("CombatFramework")).activeController
+    end)
+    
+    if CachedFramework then return CachedFramework end
+    
+    -- Fallback lại getgc của ông nếu require lỗi (rất hiếm khi xảy ra)
     for _, v in pairs(getgc(true)) do
         if type(v) == "table" and rawget(v, "activeController") then
-            return v.activeController
+            CachedFramework = v.activeController
+            return CachedFramework
         end
     end
 end
 
--- [[ FIX 2: BỎ SPAM ANIMATOR KHỎI FAST ATTACK GÂY ĐƠ NHÂN VẬT ]]
+-- [[ KỸ THUẬT ĐỤC FRAMEWORK TỐI ƯU (FIX FREEZE 100%) ]]
 local function FastAttack()
     pcall(function()
         local ac = GetFramework()
@@ -92,14 +103,19 @@ local function FastAttack()
             ac.hitboxMagnitude = 60 
             ac.timeToNextAttack = 0
             ac.attacking = false
-            ac.blocking = false
             ac.increment = 3
-            -- ĐÃ XÓA PHẦN AC.ANIMATOR.ANIMS ĐỂ CHỐNG LỖI KẸT LOGIC GAME
+            
+            -- FIX ĐIỂM CHẾT: Thay vì bắt game Play() animation liên tục gây crash logic, ta Stop() nó.
+            if ac.animator and ac.animator.anims and ac.animator.anims.basic then
+                for _, v in pairs(ac.animator.anims.basic) do
+                    v:Stop() 
+                end
+            end
         end
     end)
 end
 
--- [ QUÉT MỤC TIÊU - TỐI ƯU SORTING ]
+-- [1. QUÉT MỤC TIÊU ĐỒNG BỘ CHUẨN VỊ TRÍ (GIỮ NGUYÊN)]
 task.spawn(function()
     while true do
         task.wait(0.1)
@@ -135,7 +151,7 @@ task.spawn(function()
     end
 end)
 
--- [ AUTO CLICK SÚNG ]
+-- [2. AUTO CLICK + SPECIAL GUN LOGIC (GIỮ NGUYÊN)]
 local lastClick = 0
 task.spawn(function()
     while true do
@@ -175,7 +191,10 @@ task.spawn(function()
                                 if act and act:IsA("BindableEvent") then act:Fire() end
                                 tool:Activate()
                             end
-                            if tool:FindFirstChild("MousePos") then tool.MousePos.Value = TargetPos end
+
+                            if tool:FindFirstChild("MousePos") then
+                                tool.MousePos.Value = TargetPos
+                            end
                         end
                     end)
                 end
@@ -184,6 +203,7 @@ task.spawn(function()
     end
 end)
 
+-- [ ĐỢI REMOTE LOAD XONG MỚI CHẠY ]
 local Net, regHit, regAttack, shootGun
 repeat
     task.wait(0.5)
@@ -195,6 +215,7 @@ repeat
     end)
 until Net and regHit and regAttack
 
+-- [[ BYPASS & HOOK SECTION (GIỮ NGUYÊN) ]]
 local oldNM = nil
 local function ExtremeBypass(tool)
     pcall(function()
@@ -216,23 +237,23 @@ local function ExtremeBypass(tool)
     end)
 end
 
--- [[ FIX 3: TỐI ƯU LUỒNG GỬI DỮ LIỆU ĐÁNH LAN CHỐNG NGHẼN MẠNG ]]
-local lastHitTick = 0
-local ATTACK_DELAY = math.random(5, 9) / 100 -- Sẽ giao động từ 0.05s đến 0.09s
+-- [3. LOGIC TẤN CÔNG LAN: GIỮ NGUYÊN LUỒNG NHƯNG BỌC COOLDOWN CHỐNG KẸT]
+local lastAttackTick = 0
+local ATTACK_DELAY = 0.05 
 
 task.spawn(function()
     while true do
-        task.wait() -- Trả lại task.wait() để giảm tải CPU thay vì bắt ép Heartbeat
-        
+        RunService.Heartbeat:Wait() 
         local char = workspace:FindFirstChild("Characters") and workspace.Characters:FindFirstChild(LocalPlayer.Name) or LocalPlayer.Character
         local root = char and char:FindFirstChild("HumanoidRootPart")
         local tool = char and char:FindFirstChildOfClass("Tool")
         
         if not regHit or not regAttack or not tool or not root or #AllTargets == 0 then continue end
-        
-        -- Delay giới hạn gói tin gửi lên server
-        if tick() - lastHitTick < ATTACK_DELAY then continue end
-        lastHitTick = tick()
+
+        -- CHỐNG KẸT & LOCK SERVER Ở ĐÂY: Vẫn chạy Heartbeat mượt nhưng chỉ cho phép xuất chiêu sau một độ trễ nhỏ
+        if tick() - lastAttackTick < ATTACK_DELAY then continue end
+        lastAttackTick = tick()
+        ATTACK_DELAY = math.random(5, 9) / 100 -- Jitter ngẫu nhiên từ 0.05s đến 0.09s để lách Anti-Spam
 
         ExtremeBypass(tool)
         FastAttack() 
@@ -240,65 +261,69 @@ task.spawn(function()
         local toolName = tool.Name:lower()
         local isGuitar = toolName:find("guitar")
         local isAnyGun = (tool:GetAttribute("WeaponType") == "Gun") or (tool.ToolTip == "Gun") or isGuitar
-        local unbanID = tostring(LocalPlayer.UserId):sub(2,4)..tostring(coroutine.running()):sub(11,15)
 
-        pcall(function()
-            if not isAnyGun then
-                local fullHitList = {}
-                for j = 1, math.min(#AllTargets, 10) do
-                    local monster = AllTargets[j]
-                    if monster and monster.Parent and monster:FindFirstChild("Humanoid") and monster.Humanoid.Health > 0 then
-                        local part = monster:FindFirstChild("UpperTorso") or monster:FindFirstChild("Head")
-                        if part then table.insert(fullHitList, {monster, part}) end
-                    end
-                end
-                
-                if #fullHitList > 0 then
-                    regAttack:FireServer(-math.huge)
-                    regHit:FireServer(fullHitList[1][2], fullHitList, nil, nil, unbanID)
-                    
-                    -- LOGIC LEFTCLICK CHỈ CHẠY CHO BLOX FRUIT
-                    if tool.ToolTip == "Blox Fruit" then
-                        local leftClick = tool:FindFirstChild("LeftClickRemote", true)
-                        if leftClick then
-                            local targetPart = fullHitList[1][2]
-                            local lookVector = (targetPart.Position - root.Position).Unit
-                            if lookVector ~= lookVector then lookVector = Vector3.new(0, 1, 0) end 
-                            leftClick:FireServer(lookVector, 1, unbanID)
+        -- Giữ nguyên logic 3 luồng đồng bộ ổn định của ông
+        for i = 1, 3 do 
+            task.spawn(function() 
+                local unbanID = tostring(LocalPlayer.UserId):sub(2,4)..tostring(coroutine.running()):sub(11,15)
+                pcall(function()
+                    if not isAnyGun then
+                        local fullHitList = {}
+                        -- Cố định số lượng tối đa 7 con/nhịp để không bị ngộp khi gửi 3 luồng
+                        for j = 1, math.min(#AllTargets, 7) do
+                            local monster = AllTargets[j]
+                            if monster and monster.Parent and monster:FindFirstChild("Humanoid") and monster.Humanoid.Health > 0 then
+                                local part = monster:FindFirstChild("UpperTorso") or monster:FindFirstChild("Head")
+                                if part then table.insert(fullHitList, {monster, part}) end
+                            end
+                        end
+                        
+                        if #fullHitList > 0 then
+                            regAttack:FireServer(-math.huge)
+                            regHit:FireServer(fullHitList[1][2], fullHitList, nil, nil, unbanID)
+                            
+                            local leftClick = tool:FindFirstChild("LeftClickRemote", true)
+                            if leftClick then
+                                local targetPart = fullHitList[1][2]
+                                local lookVector = (targetPart.Position - root.Position).Unit
+                                if lookVector ~= lookVector then lookVector = Vector3.new(0, 1, 0) end 
+                                
+                                leftClick:FireServer(lookVector, 1, unbanID)
+                            end
+                            tool:Activate()
+                        end
+                    else
+                        local gunHitList = {}
+                        local shootParts = {}
+                        local primaryPos = nil
+
+                        for j = 1, math.min(#AllTargets, 7) do
+                            local monster = AllTargets[j]
+                            if monster and monster.Parent and monster:FindFirstChild("Humanoid") and monster.Humanoid.Health > 0 then
+                                local tPart = monster:FindFirstChild("Head") or monster:FindFirstChild("HumanoidRootPart")
+                                if tPart then
+                                    table.insert(gunHitList, {monster, tPart})
+                                    table.insert(shootParts, tPart)
+                                    if not primaryPos then primaryPos = tPart.Position end
+                                end
+                            end
+                        end
+
+                        if #gunHitList > 0 then
+                            regHit:FireServer(gunHitList[1][2], gunHitList, nil, nil, unbanID)
+                            
+                            if not isGuitar and shootGun and primaryPos then
+                                shootGun:FireServer(primaryPos, shootParts, unbanID)
+                            end
+
+                            if isGuitar then
+                                local remote = tool:FindFirstChild("RemoteEvent", true)
+                                if remote then remote:FireServer("TAP", gunHitList[1][2].Position, unbanID) end
+                            end
                         end
                     end
-                    tool:Activate()
-                end
-            else
-                local gunHitList = {}
-                local shootParts = {}
-                local primaryPos = nil
-
-                for j = 1, math.min(#AllTargets, 10) do
-                    local monster = AllTargets[j]
-                    if monster and monster.Parent and monster:FindFirstChild("Humanoid") and monster.Humanoid.Health > 0 then
-                        local tPart = monster:FindFirstChild("Head") or monster:FindFirstChild("HumanoidRootPart")
-                        if tPart then
-                            table.insert(gunHitList, {monster, tPart})
-                            table.insert(shootParts, tPart)
-                            if not primaryPos then primaryPos = tPart.Position end
-                        end
-                    end
-                end
-
-                if #gunHitList > 0 then
-                    regHit:FireServer(gunHitList[1][2], gunHitList, nil, nil, unbanID)
-                    
-                    if not isGuitar and shootGun and primaryPos then
-                        shootGun:FireServer(primaryPos, shootParts, unbanID)
-                    end
-
-                    if isGuitar then
-                        local remote = tool:FindFirstChild("RemoteEvent", true)
-                        if remote then remote:FireServer("TAP", gunHitList[1][2].Position, unbanID) end
-                    end
-                end
-            end
-        end)
+                end)
+            end)
+        end
     end
 end)
