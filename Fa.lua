@@ -76,10 +76,21 @@ local function GetValidator2()
     return math.floor(v9 / v4 * 16777215), v7
 end
 
--- [[ FIX LAG: CHỈ QUÉT FRAMEWORK 1 LẦN DUY NHẤT ]]
+-- [[ FIX KẸT FRAMEWORK: TỰ ĐỘNG LÀM MỚI KHI ĐỔI NHÂN VẬT ]]
 local CachedFramework = nil
+local LastCheckedChar = nil
+
 local function GetFramework()
+    local char = workspace:FindFirstChild("Characters") and workspace.Characters:FindFirstChild(LocalPlayer.Name) or LocalPlayer.Character
+    
+    -- Nếu đổi nhân vật, hồi sinh hoặc chuyển cảnh -> Reset cache để tìm Framework mới
+    if LastCheckedChar ~= char then
+        CachedFramework = nil
+        LastCheckedChar = char
+    end
+    
     if CachedFramework then return CachedFramework end
+    
     for _, v in pairs(getgc(true)) do
         if type(v) == "table" and rawget(v, "activeController") then
             CachedFramework = v.activeController
@@ -88,7 +99,7 @@ local function GetFramework()
     end
 end
 
--- [[ KỸ THUẬT ĐỤC FRAMEWORK ]]
+-- [[ KỸ THUẬT ĐỤC FRAMEWORK TỐI ƯU ]]
 local function FastAttack()
     pcall(function()
         local ac = GetFramework()
@@ -106,11 +117,11 @@ local function FastAttack()
     end)
 end
 
--- [1. QUÉT MỤC TIÊU - TỰ ĐỘNG UPDATE & SẮP XẾP THEO CON GẦN NHẤT]
+-- [1. QUÉT MỤC TIÊU ĐỒNG BỘ CHUẨN VỊ TRÍ]
 task.spawn(function()
     while true do
         task.wait(0.1)
-        local char = LocalPlayer.Character
+        local char = workspace:FindFirstChild("Characters") and workspace.Characters:FindFirstChild(LocalPlayer.Name) or LocalPlayer.Character
         local root = char and char:FindFirstChild("HumanoidRootPart")
         local targets = {} 
         
@@ -129,7 +140,7 @@ task.spawn(function()
                 end
             end
             
-            -- THUẬT TOÁN ĐỊNH VỊ: Sắp xếp bảng để con gần nhất luôn nằm ở Index 1
+            -- Giữ nguyên thuật toán sắp xếp tối ưu của ông
             table.sort(targets, function(a, b)
                 local aPart = a:FindFirstChild("HumanoidRootPart") or a:FindFirstChild("UpperTorso")
                 local bPart = b:FindFirstChild("HumanoidRootPart") or b:FindFirstChild("UpperTorso")
@@ -148,7 +159,7 @@ local lastClick = 0
 task.spawn(function()
     while true do
         task.wait() 
-        local char = LocalPlayer.Character
+        local char = workspace:FindFirstChild("Characters") and workspace.Characters:FindFirstChild(LocalPlayer.Name) or LocalPlayer.Character
         local tool = char and char:FindFirstChildOfClass("Tool")
         if tool and #AllTargets > 0 then
             local toolName = tool.Name
@@ -158,7 +169,7 @@ task.spawn(function()
                 if tick() - lastClick > Cooldown then 
                     lastClick = tick()
                     pcall(function()
-                        local firstTarget = AllTargets[1] -- Nhờ table.sort, đây luôn là con gần nhất
+                        local firstTarget = AllTargets[1]
                         if firstTarget and firstTarget.Parent and firstTarget:FindFirstChild("Humanoid") and firstTarget.Humanoid.Health > 0 then
                             local TargetPos = firstTarget:GetPivot().Position
                             local ShootType = SpecialShoots[toolName] or "Normal"
@@ -188,7 +199,7 @@ task.spawn(function()
                                 tool.MousePos.Value = TargetPos
                             end
                         end
-                    end) -- FIX LỖI "pcall)" THÀNH "end)" Ở ĐÂY
+                    end)
                 end
             end
         end
@@ -207,7 +218,7 @@ repeat
     end)
 until Net and regHit and regAttack
 
--- [[ BYPASS & HOOK SECTION - GIỮ NGUYÊN ]]
+-- [[ BYPASS & HOOK SECTION ]]
 local oldNM = nil
 local function ExtremeBypass(tool)
     pcall(function()
@@ -229,11 +240,11 @@ local function ExtremeBypass(tool)
     end)
 end
 
--- [3. LOGIC TẤN CÔNG LAN (GIGA SPEED - ĐÃ TỐI ƯU PING SÚNG LAN)]
+-- [3. LOGIC TẤN CÔNG LAN TỐI ƯU LUỒNG TRÁNH NGHẼN NETWORK]
 task.spawn(function()
     while true do
-        task.wait() 
-        local char = LocalPlayer.Character
+        RunService.Heartbeat:Wait() -- Sử dụng Heartbeat thay thế task.wait() giúp mượt và giảm ping chấn động
+        local char = workspace:FindFirstChild("Characters") and workspace.Characters:FindFirstChild(LocalPlayer.Name) or LocalPlayer.Character
         local root = char and char:FindFirstChild("HumanoidRootPart")
         local tool = char and char:FindFirstChildOfClass("Tool")
         
@@ -246,12 +257,12 @@ task.spawn(function()
         local isGuitar = toolName:find("guitar")
         local isAnyGun = (tool:GetAttribute("WeaponType") == "Gun") or (tool.ToolTip == "Gun") or isGuitar
 
-        for i = 1, 5 do 
+        -- Giới hạn tối đa 3 luồng đồng bộ ổn định, không để server chặn gói tin LeftClickRemote
+        for i = 1, 3 do 
             task.spawn(function() 
                 local unbanID = tostring(LocalPlayer.UserId):sub(2,4)..tostring(coroutine.running()):sub(11,15)
                 pcall(function()
                     if not isAnyGun then
-                        -- LOGIC CẬN CHIẾN / FRUIT (GIỮ NGUYÊN)
                         local fullHitList = {}
                         for j = 1, math.min(#AllTargets, 10) do
                             local monster = AllTargets[j]
@@ -260,16 +271,25 @@ task.spawn(function()
                                 if part then table.insert(fullHitList, {monster, part}) end
                             end
                         end
+                        
                         if #fullHitList > 0 then
                             regAttack:FireServer(-math.huge)
                             regHit:FireServer(fullHitList[1][2], fullHitList, nil, nil, unbanID)
-                            if tool:FindFirstChild("LeftClickRemote") then
-                                tool.LeftClickRemote:FireServer((fullHitList[1][2].Position - root.Position).Unit, 1, unbanID)
+                            
+                            -- FIX CHÍ MẠNG LEFTCLICKREMOTE: Quét sâu toàn bộ thư mục của Tool (true)
+                            local leftClick = tool:FindFirstChild("LeftClickRemote", true)
+                            if leftClick then
+                                local targetPart = fullHitList[1][2]
+                                local lookVector = (targetPart.Position - root.Position).Unit
+                                -- Chống lỗi vector rỗng (NaN) làm hỏng hướng đánh
+                                if lookVector ~= lookVector then lookVector = Vector3.new(0, 1, 0) end 
+                                
+                                leftClick:FireServer(lookVector, 1, unbanID)
                             end
                             tool:Activate()
                         end
                     else
-                        -- LOGIC SÚNG LAN (ĐÃ FIX GIẢM PING)
+                        -- LOGIC SÚNG LAN (GIỮ NGUYÊN TỐI ƯU PING)
                         local gunHitList = {}
                         local shootParts = {}
                         local primaryPos = nil
@@ -294,7 +314,7 @@ task.spawn(function()
                             end
 
                             if isGuitar then
-                                local remote = tool:FindFirstChild("RemoteEvent")
+                                local remote = tool:FindFirstChild("RemoteEvent", true)
                                 if remote then remote:FireServer("TAP", gunHitList[1][2].Position, unbanID) end
                             end
                         end
