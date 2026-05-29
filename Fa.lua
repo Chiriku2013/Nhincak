@@ -76,12 +76,19 @@ local function GetValidator2()
     return math.floor(v9 / v4 * 16777215), v7
 end
 
--- [[ FIX KẸT FRAMEWORK: TỰ ĐỘNG LÀM MỚI KHI ĐỔI NHÂN VẬT ]]
+-- [[ FIX TRÁNH CACHE CONTROLLER CHẾT KHI RESPAWN ]]
 local CachedFramework = nil
 local LastCheckedChar = nil
 
 local function GetFramework()
     local char = workspace:FindFirstChild("Characters") and workspace.Characters:FindFirstChild(LocalPlayer.Name) or LocalPlayer.Character
+    
+    -- Xóa cache ngay lập tức nếu nhân vật chết
+    if not char or not char:FindFirstChild("Humanoid") or char.Humanoid.Health <= 0 then
+        CachedFramework = nil
+        LastCheckedChar = nil
+        return nil
+    end
     
     if LastCheckedChar ~= char then
         CachedFramework = nil
@@ -98,7 +105,7 @@ local function GetFramework()
     end
 end
 
--- [[ KỸ THUẬT ĐỤC FRAMEWORK TỐI ƯU ]]
+-- [[ BỘ FIX KẸT FRAMEWORK CỰC ĐOAN (CHỐNG SOFT-LOCK 100%) ]]
 local function FastAttack()
     pcall(function()
         local ac = GetFramework()
@@ -106,11 +113,17 @@ local function FastAttack()
             ac.hitboxMagnitude = 60 
             ac.timeToNextAttack = 0
             ac.attacking = false
-            ac.increment = 3
+            
+            -- Xóa toàn bộ cờ chặn chém của CombatController
+            ac.blocking = false 
+            ac.active = false 
+            ac.currentActivity = "" -- Xóa activity (nguyên nhân chính kẹt chiêu)
+            ac.increment = 1 -- Reset chuỗi combo về 1 để tránh lỗi animation nhịp cuối
+            
             if ac.animator and ac.animator.anims and ac.animator.anims.basic then
                 for _, v in pairs(ac.animator.anims.basic) do
-                    -- FIX 1: Đổi Play thành Stop để giải phóng Animator, cắt hoàn toàn lỗi đơ nhân vật
-                    v:Stop() 
+                    -- Chỉ Stop khi đang chạy, tránh spam Stop gây lú Animator
+                    if v.IsPlaying then v:Stop() end 
                 end
             end
         end
@@ -239,7 +252,7 @@ local function ExtremeBypass(tool)
     end)
 end
 
--- [3. LOGIC TẤN CÔNG LAN TỐI ƯU LUỒNG TRÁNH NGHẼN NETWORK]
+-- [3. LOGIC TẤN CÔNG LAN LUỒNG X3 GIỮ NGUYÊN]
 local lastAttackTick = 0
 local ATTACK_DELAY = 0.05 
 
@@ -252,10 +265,9 @@ task.spawn(function()
         
         if not regHit or not regAttack or not tool or not root or #AllTargets == 0 then continue end
 
-        -- FIX 2: Bọc Cooldown mềm để ngăn việc gửi 180 luồng/giây lên server gây đơ mạng
         if tick() - lastAttackTick < ATTACK_DELAY then continue end
         lastAttackTick = tick()
-        ATTACK_DELAY = math.random(5, 8) / 100 -- Delay ngẫu nhiên từ 0.05s đến 0.08s để lách Anti-Spam
+        ATTACK_DELAY = math.random(5, 8) / 100 
 
         ExtremeBypass(tool)
         FastAttack() 
@@ -264,14 +276,12 @@ task.spawn(function()
         local isGuitar = toolName:find("guitar")
         local isAnyGun = (tool:GetAttribute("WeaponType") == "Gun") or (tool.ToolTip == "Gun") or isGuitar
 
-        -- Giới hạn tối đa 3 luồng đồng bộ ổn định (GIỮ NGUYÊN)
         for i = 1, 3 do 
             task.spawn(function() 
                 local unbanID = tostring(LocalPlayer.UserId):sub(2,4)..tostring(coroutine.running()):sub(11,15)
                 pcall(function()
                     if not isAnyGun then
                         local fullHitList = {}
-                        -- Giới hạn list hit xuống 7 con để tối ưu byte data gửi đi (tránh packet loss)
                         for j = 1, math.min(#AllTargets, 7) do
                             local monster = AllTargets[j]
                             if monster and monster.Parent and monster:FindFirstChild("Humanoid") and monster.Humanoid.Health > 0 then
