@@ -79,7 +79,7 @@ end
 -- [[ FIX TRÁNH CACHE CONTROLLER CHẾT KHI RESPAWN HOẶC ĐỔI VŨ KHÍ ]]
 local CachedFramework = nil
 local LastCheckedChar = nil
-local LastEquippedTool = nil -- Thêm: Theo dõi vũ khí đang cầm
+local LastEquippedTool = nil 
 
 local function GetFramework()
     local char = workspace:FindFirstChild("Characters") and workspace.Characters:FindFirstChild(LocalPlayer.Name) or LocalPlayer.Character
@@ -93,7 +93,6 @@ local function GetFramework()
     
     local currentTool = char:FindFirstChildOfClass("Tool")
     
-    -- XÓA CACHE NGAY LẬP TỨC NẾU ĐỔI VŨ KHÍ HOẶC RESPAWN (ĐÂY LÀ CHÌA KHÓA CHỐNG KẸT LÂU DÀI)
     if LastCheckedChar ~= char or LastEquippedTool ~= currentTool then
         CachedFramework = nil
         LastCheckedChar = char
@@ -110,7 +109,7 @@ local function GetFramework()
     end
 end
 
--- [[ BỘ FIX KẸT FRAMEWORK CỰC ĐOAN (ĐÃ TỐI ƯU LẠI CHỐNG SOFT-LOCK 100%) ]]
+-- [[ BỘ FIX KẸT FRAMEWORK CỰC ĐOAN (TỐI ƯU MƯỢT MÀ) ]]
 local function FastAttack()
     pcall(function()
         local ac = GetFramework()
@@ -119,19 +118,11 @@ local function FastAttack()
             ac.timeToNextAttack = 0
             ac.attacking = false
             ac.blocking = false 
-            ac.active = false 
             ac.increment = 1 
-            ac.focusStart = 0 -- Reset focus để chống kẹt hoạt ảnh vận nội công/tụ lực
+            -- Đã bỏ ac.active = false và ac.focusStart = 0 vì nó làm khựng combo game
 
-            -- CHỈ XÓA ACTIVITY NẾU NÓ LÀ ĐÁNH THƯỜNG (Tránh việc chém ngang skill đang tung ra gây lỗi game)
             if ac.currentActivity == "Attacking" or ac.currentActivity == "Reloading" or ac.currentActivity == "GunAttacking" then
                 ac.currentActivity = "" 
-            end
-            
-            if ac.animator and ac.animator.anims and ac.animator.anims.basic then
-                for _, v in pairs(ac.animator.anims.basic) do
-                    if v.IsPlaying then v:Stop() end 
-                end
             end
         end
     end)
@@ -261,7 +252,8 @@ end
 
 -- [3. LOGIC TẤN CÔNG LAN LUỒNG X3 (FIX KẸT CỰC HẠN)]
 local lastAttackTick = 0
-local ATTACK_DELAY = 0.05 
+-- TĂNG DELAY LÊN 0.12s (Tốc độ vàng) ĐỂ SERVER KHÔNG TỪ CHỐI GÓI TIN MÀ VẪN GIỮ ĐƯỢC TỐC ĐỘ SIÊU NHANH
+local ATTACK_DELAY = 0.12 
 
 task.spawn(function()
     while true do
@@ -274,7 +266,6 @@ task.spawn(function()
 
         if tick() - lastAttackTick < ATTACK_DELAY then continue end
         lastAttackTick = tick()
-        ATTACK_DELAY = math.random(5, 8) / 100 
 
         ExtremeBypass(tool)
         FastAttack() 
@@ -283,8 +274,6 @@ task.spawn(function()
         local isGuitar = toolName:find("guitar")
         local isAnyGun = (tool:GetAttribute("WeaponType") == "Gun") or (tool.ToolTip == "Gun") or isGuitar
 
-        -- BƯỚC 1: XÁC ĐỊNH MỤC TIÊU DUY NHẤT CHO VŨ KHÍ (TRÁNH KẸT)
-        local primaryTarget = AllTargets[1]
         local unbanID_base = tostring(LocalPlayer.UserId):sub(2,4)..tostring(coroutine.running()):sub(11,15)
 
         for i = 1, 3 do 
@@ -295,6 +284,7 @@ task.spawn(function()
                         local fullHitList = {}
                         for j = 1, math.min(#AllTargets, 7) do
                             local monster = AllTargets[j]
+                            -- BẢO MẬT GÓI TIN: Kiểm tra máu trực tiếp 1 lần nữa ngay trước khi đóng gói
                             if monster and monster.Parent and monster:FindFirstChild("Humanoid") and monster.Humanoid.Health > 0 then
                                 local part = monster:FindFirstChild("UpperTorso") or monster:FindFirstChild("Head")
                                 if part then table.insert(fullHitList, {monster, part}) end
@@ -302,10 +292,8 @@ task.spawn(function()
                         end
                         
                         if #fullHitList > 0 then
-                            -- Gửi DAMAGE (Damage x3)
                             regHit:FireServer(fullHitList[1][2], fullHitList, nil, nil, unbanID)
                             
-                            -- CHỈ LUỒNG ĐẦU TIÊN MỚI ĐƯỢC GỬI LỆNH ĐIỀU KHIỂN VŨ KHÍ
                             if i == 1 then
                                 regAttack:FireServer(-math.huge)
                                 local leftClick = tool:FindFirstChild("LeftClickRemote", true)
@@ -314,7 +302,7 @@ task.spawn(function()
                                     if lookVector ~= lookVector then lookVector = Vector3.new(0, 1, 0) end 
                                     leftClick:FireServer(lookVector, 1, unbanID_base)
                                 end
-                                tool:Activate()
+                                -- Đã bỏ tool:Activate() ở đây vì nó xung đột với VirtualInput gây kẹt chuột game
                             end
                         end
                     else
@@ -334,7 +322,6 @@ task.spawn(function()
                         if #gunHitList > 0 then
                             regHit:FireServer(gunHitList[1][2], gunHitList, nil, nil, unbanID)
                             
-                            -- CHỈ LUỒNG ĐẦU TIÊN MỚI ĐƯỢC GỬI LỆNH SHOOT
                             if i == 1 then
                                 if not isGuitar and shootGun then
                                     shootGun:FireServer(gunHitList[1][2].Position, shootParts, unbanID_base)
@@ -348,6 +335,8 @@ task.spawn(function()
                     end
                 end)
             end)
+            -- CHỐNG KẸT LUỒNG: Delay vi mô 0.01s giữa 3 luồng để Server nhai kịp gói tin, tránh bị hủy AoE
+            task.wait(0.01) 
         end
     end
 end)
