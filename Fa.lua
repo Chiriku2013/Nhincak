@@ -76,23 +76,28 @@ local function GetValidator2()
     return math.floor(v9 / v4 * 16777215), v7
 end
 
--- [[ FIX TRÁNH CACHE CONTROLLER CHẾT KHI RESPAWN ]]
+-- [[ FIX TRÁNH CACHE CONTROLLER CHẾT KHI RESPAWN HOẶC ĐỔI VŨ KHÍ ]]
 local CachedFramework = nil
 local LastCheckedChar = nil
+local LastEquippedTool = nil -- Thêm: Theo dõi vũ khí đang cầm
 
 local function GetFramework()
     local char = workspace:FindFirstChild("Characters") and workspace.Characters:FindFirstChild(LocalPlayer.Name) or LocalPlayer.Character
     
-    -- Xóa cache ngay lập tức nếu nhân vật chết
     if not char or not char:FindFirstChild("Humanoid") or char.Humanoid.Health <= 0 then
         CachedFramework = nil
         LastCheckedChar = nil
+        LastEquippedTool = nil
         return nil
     end
     
-    if LastCheckedChar ~= char then
+    local currentTool = char:FindFirstChildOfClass("Tool")
+    
+    -- XÓA CACHE NGAY LẬP TỨC NẾU ĐỔI VŨ KHÍ HOẶC RESPAWN (ĐÂY LÀ CHÌA KHÓA CHỐNG KẸT LÂU DÀI)
+    if LastCheckedChar ~= char or LastEquippedTool ~= currentTool then
         CachedFramework = nil
         LastCheckedChar = char
+        LastEquippedTool = currentTool
     end
     
     if CachedFramework then return CachedFramework end
@@ -105,7 +110,7 @@ local function GetFramework()
     end
 end
 
--- [[ BỘ FIX KẸT FRAMEWORK CỰC ĐOAN (CHỐNG SOFT-LOCK 100%) ]]
+-- [[ BỘ FIX KẸT FRAMEWORK CỰC ĐOAN (ĐÃ TỐI ƯU LẠI CHỐNG SOFT-LOCK 100%) ]]
 local function FastAttack()
     pcall(function()
         local ac = GetFramework()
@@ -113,16 +118,18 @@ local function FastAttack()
             ac.hitboxMagnitude = 60 
             ac.timeToNextAttack = 0
             ac.attacking = false
-            
-            -- Xóa toàn bộ cờ chặn chém của CombatController
             ac.blocking = false 
             ac.active = false 
-            ac.currentActivity = "" -- Xóa activity (nguyên nhân chính kẹt chiêu)
-            ac.increment = 1 -- Reset chuỗi combo về 1 để tránh lỗi animation nhịp cuối
+            ac.increment = 1 
+            ac.focusStart = 0 -- Reset focus để chống kẹt hoạt ảnh vận nội công/tụ lực
+
+            -- CHỈ XÓA ACTIVITY NẾU NÓ LÀ ĐÁNH THƯỜNG (Tránh việc chém ngang skill đang tung ra gây lỗi game)
+            if ac.currentActivity == "Attacking" or ac.currentActivity == "Reloading" or ac.currentActivity == "GunAttacking" then
+                ac.currentActivity = "" 
+            end
             
             if ac.animator and ac.animator.anims and ac.animator.anims.basic then
                 for _, v in pairs(ac.animator.anims.basic) do
-                    -- Chỉ Stop khi đang chạy, tránh spam Stop gây lú Animator
                     if v.IsPlaying then v:Stop() end 
                 end
             end
@@ -282,7 +289,7 @@ task.spawn(function()
 
         for i = 1, 3 do 
             task.spawn(function() 
-                local unbanID = unbanID_base .. i -- Đảm bảo mỗi gói tin có ID riêng biệt
+                local unbanID = unbanID_base .. i 
                 pcall(function()
                     if not isAnyGun then
                         local fullHitList = {}
