@@ -76,7 +76,7 @@ local function GetValidator2()
     return math.floor(v9 / v4 * 16777215), v7
 end
 
--- [[ FIX TRÁNH CACHE CONTROLLER CHẾT KHI RESPAWN HOẶC ĐỔI VŨ KHÍ ]]
+-- [[ FIX TRÁNH CACHE CONTROLLER TỐI ƯU BỘ NHỚ ]]
 local CachedFramework = nil
 local LastCheckedChar = nil
 local LastEquippedTool = nil 
@@ -93,6 +93,7 @@ local function GetFramework()
     
     local currentTool = char:FindFirstChildOfClass("Tool")
     
+    -- Nếu đổi vũ khí hoặc respawn, ép quét lại gc để tránh dính Framework rác
     if LastCheckedChar ~= char or LastEquippedTool ~= currentTool then
         CachedFramework = nil
         LastCheckedChar = char
@@ -109,7 +110,7 @@ local function GetFramework()
     end
 end
 
--- [[ BỘ FIX KẸT FRAMEWORK CỰC ĐOAN (TỐI ƯU MƯỢT MÀ) ]]
+-- [[ BỘ FIX KẸT FRAMEWORK CỰC ĐOAN (BÍ QUYẾT TỐI THƯỢNG) ]]
 local function FastAttack()
     pcall(function()
         local ac = GetFramework()
@@ -119,10 +120,19 @@ local function FastAttack()
             ac.attacking = false
             ac.blocking = false 
             ac.increment = 1 
-            -- Đã bỏ ac.active = false và ac.focusStart = 0 vì nó làm khựng combo game
 
             if ac.currentActivity == "Attacking" or ac.currentActivity == "Reloading" or ac.currentActivity == "GunAttacking" then
                 ac.currentActivity = "" 
+            end
+
+            -- FIX CHÍ MẠNG 1: Ép animation chạy max tốc độ thay vì Stop(). 
+            -- Điều này giúp Game Animator vẫn gửi đủ tín hiệu "Kết thúc đòn" cho server, loại bỏ 100% tỷ lệ kẹt logic AFK.
+            if ac.animator and ac.animator.anims and ac.animator.anims.basic then
+                for _, v in pairs(ac.animator.anims.basic) do
+                    if v.IsPlaying then
+                        v:AdjustSpeed(math.huge) 
+                    end
+                end
             end
         end
     end)
@@ -164,7 +174,7 @@ task.spawn(function()
     end
 end)
 
--- [2. AUTO CLICK + SPECIAL GUN LOGIC]
+-- [2. AUTO CLICK + SPECIAL GUN LOGIC (ĐÃ LỌC XUNG ĐỘT)]
 local lastClick = 0
 task.spawn(function()
     while true do
@@ -196,13 +206,11 @@ task.spawn(function()
                                     game:GetService("ReplicatedStorage").Modules.Net["RE/ShootGunEvent"]:FireServer(TargetPos)
                                 end
                             else
-                                local rx, ry = math.random(1, 5), math.random(1, 5)
-                                VIM:SendMouseButtonEvent(rx, ry, 0, true, game, 0)
-                                VIM:SendMouseButtonEvent(rx, ry, 0, false, game, 0)
-                                
+                                -- FIX CHÍ MẠNG 2: Xóa VIM (Virtual Input) đối với Melee/Sword.
+                                -- Tránh tình trạng Tool bị "kéo 2 đầu" giữa Client VIM và Server Remote gây kẹt.
                                 local act = tool:FindFirstChild("Activated")
                                 if act and act:IsA("BindableEvent") then act:Fire() end
-                                tool:Activate()
+                                pcall(function() tool:Activate() end)
                             end
 
                             if tool:FindFirstChild("MousePos") then
@@ -250,9 +258,8 @@ local function ExtremeBypass(tool)
     end)
 end
 
--- [3. LOGIC TẤN CÔNG LAN LUỒNG X3 (FIX KẸT CỰC HẠN)]
+-- [3. LOGIC TẤN CÔNG LAN LUỒNG X3 - CHUẨN XÁC, KHÔNG MISS GÓI TIN]
 local lastAttackTick = 0
--- TĂNG DELAY LÊN 0.12s (Tốc độ vàng) ĐỂ SERVER KHÔNG TỪ CHỐI GÓI TIN MÀ VẪN GIỮ ĐƯỢC TỐC ĐỘ SIÊU NHANH
 local ATTACK_DELAY = 0.12 
 
 task.spawn(function()
@@ -284,7 +291,7 @@ task.spawn(function()
                         local fullHitList = {}
                         for j = 1, math.min(#AllTargets, 7) do
                             local monster = AllTargets[j]
-                            -- BẢO MẬT GÓI TIN: Kiểm tra máu trực tiếp 1 lần nữa ngay trước khi đóng gói
+                            -- BẢO MẬT GÓI TIN: Xác minh quái vẫn đang sống và tồn tại trong workspace ngay lúc chém
                             if monster and monster.Parent and monster:FindFirstChild("Humanoid") and monster.Humanoid.Health > 0 then
                                 local part = monster:FindFirstChild("UpperTorso") or monster:FindFirstChild("Head")
                                 if part then table.insert(fullHitList, {monster, part}) end
@@ -302,7 +309,6 @@ task.spawn(function()
                                     if lookVector ~= lookVector then lookVector = Vector3.new(0, 1, 0) end 
                                     leftClick:FireServer(lookVector, 1, unbanID_base)
                                 end
-                                -- Đã bỏ tool:Activate() ở đây vì nó xung đột với VirtualInput gây kẹt chuột game
                             end
                         end
                     else
@@ -335,7 +341,6 @@ task.spawn(function()
                     end
                 end)
             end)
-            -- CHỐNG KẸT LUỒNG: Delay vi mô 0.01s giữa 3 luồng để Server nhai kịp gói tin, tránh bị hủy AoE
             task.wait(0.01) 
         end
     end
