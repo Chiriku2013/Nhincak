@@ -36,7 +36,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local VIM = game:GetService("VirtualInputManager")
 
 local RANGE = 1000 
-local AUTO_AIM_RANGE = 350 -- [NEW] Giới hạn Auto Aim 350m
+local AUTO_AIM_RANGE = 350 -- [GIỚI HẠN AUTO AIM KỸ NĂNG/SÚNG: 350m]
 local AllTargets = {}
 
 -- [[ HỆ THỐNG VALIDATOR SÚNG & SPECIAL METHODS ]]
@@ -94,7 +94,6 @@ local function GetFramework()
     
     local currentTool = char:FindFirstChildOfClass("Tool")
     
-    -- Nếu đổi vũ khí hoặc respawn, ép quét lại gc để tránh dính Framework rác
     if LastCheckedChar ~= char or LastEquippedTool ~= currentTool then
         CachedFramework = nil
         LastCheckedChar = char
@@ -111,7 +110,7 @@ local function GetFramework()
     end
 end
 
--- [[ BỘ FIX KẸT FRAMEWORK CỰC ĐOAN (TÁC ĐỘNG SÂU) ]]
+-- [[ BỘ FIX KẸT FRAMEWORK CHUẨN (GIỮ MƯỢT LOGIC CLIENT) ]]
 local function FastAttack()
     pcall(function()
         local ac = GetFramework()
@@ -120,14 +119,16 @@ local function FastAttack()
             ac.timeToNextAttack = 0
             ac.attacking = false
             ac.blocking = false 
-            ac.active = false -- [NEW] Reset cưỡng chế chống soft-lock
-            ac.increment = 3 -- [NEW] Skip nhịp đầu để vung nhanh hơn
+            
+            -- FIX KẸT LOGIC: Không force ac.active = false. Cho phép increment xoay vòng mượt mà
+            if ac.increment and ac.increment > 4 then
+                ac.increment = 1
+            end
 
             if ac.currentActivity == "Attacking" or ac.currentActivity == "Reloading" or ac.currentActivity == "GunAttacking" then
                 ac.currentActivity = "" 
             end
 
-            -- FIX CHÍ MẠNG 1: Ép animation chạy max tốc độ thay vì Stop(). 
             if ac.animator and ac.animator.anims and ac.animator.anims.basic then
                 for _, v in pairs(ac.animator.anims.basic) do
                     if v.IsPlaying then
@@ -139,7 +140,7 @@ local function FastAttack()
     end)
 end
 
--- [1. QUÉT MỤC TIÊU ĐỒNG BỘ CHUẨN VỊ TRÍ]
+-- [1. QUÉT MỤC TIÊU ĐỒNG BỘ CHUẨN VỊ TRÍ (1000m)]
 task.spawn(function()
     while true do
         task.wait(0.1)
@@ -175,11 +176,11 @@ task.spawn(function()
     end
 end)
 
--- [[ HOOK AUTO AIM CHUỘT (DÀNH CHO KỸ NĂNG VÀ SÚNG - 350M) ]]
+-- [[ HOOK AUTO AIM CHUỘT (SÚNG & CHIÊU - GIỚI HẠN 350M) ]]
 local mouse = LocalPlayer:GetMouse()
 local oldIndex = nil
 oldIndex = hookmetamethod(game, "__index", function(self, key)
-    if self == mouse and not checkcaller() then
+    if not checkcaller() and self == mouse then
         if key == "Hit" or key == "Target" then
             local char = LocalPlayer.Character
             local root = char and char:FindFirstChild("HumanoidRootPart")
@@ -195,7 +196,73 @@ oldIndex = hookmetamethod(game, "__index", function(self, key)
     return oldIndex(self, key)
 end)
 
--- [2. AUTO CLICK + SPECIAL GUN LOGIC]
+-- [ ĐỢI REMOTE LOAD XONG MỚI CHẠY ]
+local Net, regHit, regAttack, shootGun
+repeat
+    task.wait(0.5)
+    pcall(function()
+        Net = ReplicatedStorage:FindFirstChild("Modules"):FindFirstChild("Net")
+        regHit = Net:FindFirstChild("RE/RegisterHit")
+        regAttack = Net:FindFirstChild("RE/RegisterAttack")
+        shootGun = Net:FindFirstChild("RE/ShootGunEvent")
+    end)
+until Net and regHit and regAttack
+
+-- [[ BYPASS & HOOK NAMECALL CHUẨN (KHÔNG LỖI - BẺ GÓC KỸ NĂNG Z,X,C,V) ]]
+local oldNM = nil
+local function ExtremeBypass(tool)
+    pcall(function()
+        if tool:IsA("Tool") then
+            tool:SetAttribute("AttackCooldown", 0)
+            tool:SetAttribute("LastAttack", 0)
+            tool:SetAttribute("State", 0) 
+            if not getgenv().Hooked then
+                oldNM = hookmetamethod(game, "__namecall", function(self, ...)
+                    local method = getnamecallmethod()
+                    local args = {...}
+
+                    if not checkcaller() then
+                        -- Bypass Hit
+                        if method == "FireServer" and self.Name == "RE/RegisterAttack" then
+                            return oldNM(self, -math.huge)
+                        end
+                        
+                        -- LỌC CHUẨN: Chỉ Auto Aim cho RemoteEvent/RemoteFunction phát ra từ Nhân Vật / Vũ khí đang cầm
+                        if (method == "FireServer" or method == "InvokeServer") and (self:IsA("RemoteEvent") or self:IsA("RemoteFunction")) then
+                            local char = LocalPlayer.Character
+                            -- Tránh bẻ nhầm gói tin hệ thống (di chuyển, camera) -> Gây văng/lỗi game
+                            if char and self:IsDescendantOf(char) then
+                                if self.Name ~= "RE/RegisterHit" and self.Name ~= "RE/RegisterAttack" then
+                                    local root = char:FindFirstChild("HumanoidRootPart")
+                                    if root and AllTargets[1] then
+                                        local tRoot = AllTargets[1]:FindFirstChild("HumanoidRootPart") or AllTargets[1]:FindFirstChild("UpperTorso")
+                                        if tRoot and (tRoot.Position - root.Position).Magnitude <= AUTO_AIM_RANGE then
+                                            local changed = false
+                                            for i, v in ipairs(args) do
+                                                if typeof(v) == "Vector3" then
+                                                    args[i] = tRoot.Position
+                                                    changed = true
+                                                elseif typeof(v) == "CFrame" then
+                                                    args[i] = CFrame.new(root.Position, tRoot.Position) -- Quay mặt chuẩn xác
+                                                    changed = true
+                                                end
+                                            end
+                                            if changed then return oldNM(self, unpack(args)) end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                    return oldNM(self, ...)
+                end)
+                getgenv().Hooked = true
+            end
+        end
+    end)
+end
+
+-- [2. AUTO CLICK CHO SPECIAL GUN]
 local lastClick = 0
 task.spawn(function()
     while true do
@@ -212,7 +279,9 @@ task.spawn(function()
                     pcall(function()
                         local firstTarget = AllTargets[1]
                         if firstTarget and firstTarget.Parent and firstTarget:FindFirstChild("Humanoid") and firstTarget.Humanoid.Health > 0 then
-                            local TargetPos = firstTarget:GetPivot().Position
+                            -- Nếu quái trong tầm 350m thì Auto Aim ngắm thẳng, nếu xa hơn thì ngắm bừa
+                            local tPart = firstTarget:FindFirstChild("HumanoidRootPart") or firstTarget:FindFirstChild("UpperTorso")
+                            local TargetPos = tPart.Position
                             local ShootType = SpecialShoots[toolName] or "Normal"
 
                             if ShootType ~= "Normal" then
@@ -243,71 +312,11 @@ task.spawn(function()
     end
 end)
 
--- [ ĐỢI REMOTE LOAD XONG MỚI CHẠY ]
-local Net, regHit, regAttack, shootGun
-repeat
-    task.wait(0.5)
-    pcall(function()
-        Net = ReplicatedStorage:FindFirstChild("Modules"):FindFirstChild("Net")
-        regHit = Net:FindFirstChild("RE/RegisterHit")
-        regAttack = Net:FindFirstChild("RE/RegisterAttack")
-        shootGun = Net:FindFirstChild("RE/ShootGunEvent")
-    end)
-until Net and regHit and regAttack
-
--- [[ BYPASS & HOOK SECTION (CẬP NHẬT AUTO AIM KỸ NĂNG BẺ GÓC GÓI TIN) ]]
-local oldNM = nil
-local function ExtremeBypass(tool)
-    pcall(function()
-        if tool:IsA("Tool") then
-            tool:SetAttribute("AttackCooldown", 0)
-            tool:SetAttribute("LastAttack", 0)
-            tool:SetAttribute("State", 0) 
-            if not getgenv().Hooked then
-                oldNM = hookmetamethod(game, "__namecall", function(self, ...)
-                    local method = getnamecallmethod()
-                    local args = {...}
-
-                    if not checkcaller() then
-                        -- Bypass Hit
-                        if method == "FireServer" and self.Name == "RE/RegisterAttack" then
-                            return oldNM(self, -math.huge)
-                        end
-                        
-                        -- Auto Aim cho Remote đánh chiêu (Tất cả vũ khí & Fruit) - Limit 350m
-                        if (method == "FireServer" or method == "InvokeServer") and self.Name ~= "RE/RegisterHit" and self.Name ~= "RE/RegisterAttack" then
-                            local char = LocalPlayer.Character
-                            local root = char and char:FindFirstChild("HumanoidRootPart")
-                            if root and AllTargets[1] then
-                                local tRoot = AllTargets[1]:FindFirstChild("HumanoidRootPart") or AllTargets[1]:FindFirstChild("UpperTorso")
-                                if tRoot and (tRoot.Position - root.Position).Magnitude <= AUTO_AIM_RANGE then
-                                    local changed = false
-                                    for i, v in ipairs(args) do
-                                        if typeof(v) == "Vector3" then
-                                            args[i] = tRoot.Position
-                                            changed = true
-                                        elseif typeof(v) == "CFrame" then
-                                            args[i] = tRoot.CFrame
-                                            changed = true
-                                        end
-                                    end
-                                    if changed then return oldNM(self, unpack(args)) end
-                                end
-                            end
-                        end
-                    end
-                    return oldNM(self, ...)
-                end)
-                getgenv().Hooked = true
-            end
-        end
-    end)
-end
-
--- [3. LOGIC TẤN CÔNG LAN LUỒNG X3 - FIX CHỐNG KẸT LOGIC CỰC HẠN]
+-- [3. LOGIC TẤN CÔNG LAN LUỒNG X3 - CHUẨN XÁC]
 local lastAttackTick = 0
-local lastLeftClickTick = 0 -- [NEW] Biến điều tiết nhịp vung tay/tung chiêu
+local lastLeftClickTick = 0 
 local ATTACK_DELAY = 0.12 
+local LEFT_CLICK_DELAY = 0.2 -- Tách nhịp vung tay (LeftClickRemote) riêng để chống kẹt Client
 
 task.spawn(function()
     while true do
@@ -345,12 +354,13 @@ task.spawn(function()
                         end
                         
                         if #fullHitList > 0 then
+                            -- Xả Hit liên tục x3
                             regHit:FireServer(fullHitList[1][2], fullHitList, nil, nil, unbanID)
                             
-                            -- FIX CHÍ MẠNG 2: Decouple LeftClickRemote (Cho cả Melee, Sword, Blox Fruit)
+                            -- FIX KẸT MELEE/SWORD/BLOX FRUIT: Gọi LeftClickRemote độc lập có Delay
                             if i == 1 then
                                 regAttack:FireServer(-math.huge)
-                                if tick() - lastLeftClickTick > 0.25 then
+                                if tick() - lastLeftClickTick > LEFT_CLICK_DELAY then
                                     lastLeftClickTick = tick()
                                     local leftClick = tool:FindFirstChild("LeftClickRemote", true)
                                     if leftClick then
@@ -378,7 +388,6 @@ task.spawn(function()
                         if #gunHitList > 0 then
                             regHit:FireServer(gunHitList[1][2], gunHitList, nil, nil, unbanID)
                             
-                            -- Cân bằng nhịp bắn Súng/Guitar
                             if i == 1 and (tick() - lastLeftClickTick > 0.15) then
                                 lastLeftClickTick = tick()
                                 local targetPos = gunHitList[1][2].Position
@@ -389,13 +398,13 @@ task.spawn(function()
                                     shootGun:FireServer(targetPos, shootParts, unbanID_base)
                                 end
                                 
-                                -- FIX GUITAR: Đảm bảo đường đạn chuẩn xác 100% thẳng mục tiêu
+                                -- FIX GUITAR CHUẨN XÁC VÀO QUÁI
                                 if isGuitar then
                                     local remote = tool:FindFirstChild("RemoteEvent", true)
-                                    if remote then
+                                    if remote then 
                                         local v9, v7 = GetValidator2()
                                         if v9 then GunValidator:FireServer(v9, v7) end
-                                        remote:FireServer("TAP", targetPos, unbanID_base)
+                                        remote:FireServer("TAP", targetPos, unbanID_base) 
                                     end
                                 end
                             end
