@@ -53,6 +53,7 @@ pcall(function()
     ShootFunction = getupvalue(require(ReplicatedStorage.Controllers.CombatController).Attack, 9)
 end)
 
+-- Hàm nâng cấp hệ thống lưu trữ trạng thái bypass Validator2 chuẩn từ bạn
 local function GetValidator2()
     if not ShootFunction then return nil end
     local v1 = getupvalue(ShootFunction, 15)
@@ -70,6 +71,10 @@ local function GetValidator2()
     v6 = v9 - v5 * v3
     v7 = v7 + 1
     
+    setupvalue(ShootFunction, 15, v1)
+    setupvalue(ShootFunction, 13, v2)
+    setupvalue(ShootFunction, 16, v3)
+    setupvalue(ShootFunction, 17, v4)
     setupvalue(ShootFunction, 14, v5)
     setupvalue(ShootFunction, 12, v6)
     setupvalue(ShootFunction, 18, v7)
@@ -175,7 +180,7 @@ task.spawn(function()
     end
 end)
 
--- [2. AUTO CLICK + SPECIAL GUN LOGIC]
+-- [2. AUTO CLICK + SPECIAL GUN LOGIC - GIỮ NGUYÊN VÒNG LẶP GỐC CỦA BẠN VÀ THÊM LOCALTOTALSHOTS]
 local lastClick = 0
 task.spawn(function()
     while true do
@@ -194,6 +199,9 @@ task.spawn(function()
                         if firstTarget and firstTarget.Parent and firstTarget:FindFirstChild("Humanoid") and firstTarget.Humanoid.Health > 0 then
                             local TargetPos = firstTarget:GetPivot().Position
                             local ShootType = SpecialShoots[toolName] or "Normal"
+
+                            -- Tăng thuộc tính LocalTotalShots của súng khi thực hiện bắn giống mã mới của bạn
+                            tool:SetAttribute("LocalTotalShots", (tool:GetAttribute("LocalTotalShots") or 0) + 1)
 
                             if ShootType ~= "Normal" then
                                 local v9, v7 = GetValidator2()
@@ -259,7 +267,7 @@ end
 
 -- [3. LOGIC TẤN CÔNG LAN LUỒNG X3 - ĐÃ TÁCH RIÊNG LOGIC MELEE/SWORD, FRUIT VÀ GUN]
 local lastAttackTick = 0
-local ATTACK_DELAY = 0.12 
+local ATTACK_DELAY = 0.01
 
 task.spawn(function()
     while true do
@@ -290,7 +298,7 @@ task.spawn(function()
                 pcall(function()
                     if not isAnyGun then
                         local fullHitList = {}
-                        for j = 1, math.min(#AllTargets, 7) do
+                        for j = 1, math.min(#AllTargets, 10) do
                             local monster = AllTargets[j]
                             if monster and monster.Parent and monster:FindFirstChild("Humanoid") and monster.Humanoid.Health > 0 then
                                 local part = monster:FindFirstChild("UpperTorso") or monster:FindFirstChild("Head")
@@ -321,7 +329,7 @@ task.spawn(function()
                         local shootParts = {}
                         local targetPos = nil -- Vị trí auto aim đạn
 
-                        for j = 1, math.min(#AllTargets, 7) do
+                        for j = 1, math.min(#AllTargets, 10) do
                             local monster = AllTargets[j]
                             if monster and monster.Parent and monster:FindFirstChild("Humanoid") and monster.Humanoid.Health > 0 then
                                 local tPart = monster:FindFirstChild("Head") or monster:FindFirstChild("HumanoidRootPart")
@@ -329,7 +337,7 @@ task.spawn(function()
                                     table.insert(gunHitList, {monster, tPart})
                                     table.insert(shootParts, tPart)
                                     
-                                    -- GIỚI HẠN AUTO AIM ĐẠN 350M 
+                                    -- GIỚI HẠN AUTO AIM ĐẠN 1000M 
                                     if not targetPos then
                                         if (tPart.Position - root.Position).Magnitude <= GUN_AIM_RANGE then
                                             targetPos = tPart.Position
@@ -340,11 +348,12 @@ task.spawn(function()
                         end
 
                         if #gunHitList > 0 then
-                            -- Nếu quái vượt quá 350m, đạn sẽ tự bắn thẳng về phía trước mặt để tránh lỗi game
+                            -- Nếu quái vượt quá 1000m, đạn sẽ tự bắn thẳng về phía trước mặt để tránh lỗi game
                             if not targetPos then
                                 targetPos = root.Position + (root.CFrame.LookVector * 100)
                             end
 
+                            -- [ GIỮ NGUYÊN HOÀN TOÀN LOGIC LAN LUỒNG + UNBAN ID Ở ĐÂY ]
                             regHit:FireServer(gunHitList[1][2], gunHitList, nil, nil, unbanID)
                             
                             if i == 1 then
