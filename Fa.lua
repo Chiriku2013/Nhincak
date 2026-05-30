@@ -35,8 +35,8 @@ local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local VIM = game:GetService("VirtualInputManager")
 
-local RANGE = 1000 
-local AUTO_AIM_RANGE = 350 -- [GIỚI HẠN AUTO AIM KỸ NĂNG/SÚNG: 350m]
+local RANGE = 1000       -- Phạm vi Fast Attack
+local AIM_RANGE = 350    -- Phạm vi Auto Aim Skills/Đạn
 local AllTargets = {}
 
 -- [[ HỆ THỐNG VALIDATOR SÚNG & SPECIAL METHODS ]]
@@ -110,28 +110,23 @@ local function GetFramework()
     end
 end
 
--- [[ BỘ FIX KẸT FRAMEWORK CHUẨN (GIỮ MƯỢT LOGIC CLIENT) ]]
+-- [[ BỘ FIX KẸT FRAMEWORK CHỐNG LAG PING/FPS ]]
 local function FastAttack()
     pcall(function()
         local ac = GetFramework()
         if ac and ac.equipped then
             ac.hitboxMagnitude = 60 
             ac.timeToNextAttack = 0
-            ac.attacking = false
-            ac.blocking = false 
             
-            -- FIX KẸT LOGIC: Không force ac.active = false. Cho phép increment xoay vòng mượt mà
-            if ac.increment and ac.increment > 4 then
-                ac.increment = 1
-            end
-
+            -- Không hard-reset 'attacking' mù quáng, chỉ reset activity nếu an toàn
             if ac.currentActivity == "Attacking" or ac.currentActivity == "Reloading" or ac.currentActivity == "GunAttacking" then
                 ac.currentActivity = "" 
             end
 
+            -- Chống khựng Animation khi lag FPS
             if ac.animator and ac.animator.anims and ac.animator.anims.basic then
                 for _, v in pairs(ac.animator.anims.basic) do
-                    if v.IsPlaying then
+                    if v.IsPlaying and v.Speed < 100 then
                         v:AdjustSpeed(math.huge) 
                     end
                 end
@@ -140,7 +135,7 @@ local function FastAttack()
     end)
 end
 
--- [1. QUÉT MỤC TIÊU ĐỒNG BỘ CHUẨN VỊ TRÍ (1000m)]
+-- [1. QUÉT MỤC TIÊU ĐỒNG BỘ CHUẨN VỊ TRÍ]
 task.spawn(function()
     while true do
         task.wait(0.1)
@@ -176,25 +171,65 @@ task.spawn(function()
     end
 end)
 
--- [[ HOOK AUTO AIM CHUỘT (SÚNG & CHIÊU - GIỚI HẠN 350M) ]]
-local mouse = LocalPlayer:GetMouse()
-local oldIndex = nil
-oldIndex = hookmetamethod(game, "__index", function(self, key)
-    if not checkcaller() and self == mouse then
-        if key == "Hit" or key == "Target" then
-            local char = LocalPlayer.Character
-            local root = char and char:FindFirstChild("HumanoidRootPart")
-            if root and AllTargets[1] then
-                local tRoot = AllTargets[1]:FindFirstChild("HumanoidRootPart") or AllTargets[1]:FindFirstChild("UpperTorso")
-                if tRoot and (tRoot.Position - root.Position).Magnitude <= AUTO_AIM_RANGE then
-                    if key == "Hit" then return tRoot.CFrame end
-                    if key == "Target" then return AllTargets[1] end
-                end
+-- [[ HÀM TÌM MỤC TIÊU CHO AUTO AIM (GIỚI HẠN 350M) ]]
+local function GetAimTarget()
+    local char = workspace:FindFirstChild("Characters") and workspace.Characters:FindFirstChild(LocalPlayer.Name) or LocalPlayer.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not root then return nil end
+    
+    for _, v in ipairs(AllTargets) do
+        if v and v.Parent and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 then
+            local tPart = v:FindFirstChild("HumanoidRootPart") or v:FindFirstChild("UpperTorso")
+            if tPart and (tPart.Position - root.Position).Magnitude <= AIM_RANGE then
+                return tPart
             end
         end
     end
-    return oldIndex(self, key)
-end)
+    return nil
+end
+
+-- [[ BỘ HOOK TỐI THƯỢNG: EXTREME BYPASS + GLOBAL AUTO AIM CỰC CHUẨN ]]
+local oldNM = nil
+if not getgenv().Hooked then
+    oldNM = hookmetamethod(game, "__namecall", function(self, ...)
+        local method = getnamecallmethod()
+        local args = {...}
+
+        -- Chỉ can thiệp nếu gói tin xuất phát từ Game (không chặn gói tin từ Script này gửi)
+        if not checkcaller() then
+            if method == "FireServer" or method == "InvokeServer" then
+                
+                -- 1. EXTREME BYPASS CỦA BẠN (GIỮ NGUYÊN)
+                if self.Name == "RE/RegisterAttack" then
+                    return oldNM(self, -math.huge)
+                end
+
+                -- 2. HỆ THỐNG AUTO AIM 350M (Đánh chặn mọi kỹ năng ném ra tọa độ)
+                -- Loại trừ CommF_ để không vô tình kẹt mua bán/quest
+                if self.Name ~= "CommF_" and typeof(self) == "Instance" and (self:IsA("RemoteEvent") or self:IsA("RemoteFunction")) then
+                    local aimPart = GetAimTarget()
+                    if aimPart then
+                        local modified = false
+                        for i, arg in ipairs(args) do
+                            if typeof(arg) == "Vector3" then
+                                args[i] = aimPart.Position
+                                modified = true
+                            elseif typeof(arg) == "CFrame" then
+                                args[i] = aimPart.CFrame
+                                modified = true
+                            end
+                        end
+                        if modified then
+                            return oldNM(self, unpack(args))
+                        end
+                    end
+                end
+            end
+        end
+        return oldNM(self, ...)
+    end)
+    getgenv().Hooked = true
+end
 
 -- [ ĐỢI REMOTE LOAD XONG MỚI CHẠY ]
 local Net, regHit, regAttack, shootGun
@@ -208,115 +243,24 @@ repeat
     end)
 until Net and regHit and regAttack
 
--- [[ BYPASS & HOOK NAMECALL CHUẨN (KHÔNG LỖI - BẺ GÓC KỸ NĂNG Z,X,C,V) ]]
-local oldNM = nil
-local function ExtremeBypass(tool)
-    pcall(function()
-        if tool:IsA("Tool") then
-            tool:SetAttribute("AttackCooldown", 0)
-            tool:SetAttribute("LastAttack", 0)
-            tool:SetAttribute("State", 0) 
-            if not getgenv().Hooked then
-                oldNM = hookmetamethod(game, "__namecall", function(self, ...)
-                    local method = getnamecallmethod()
-                    local args = {...}
-
-                    if not checkcaller() then
-                        -- Bypass Hit
-                        if method == "FireServer" and self.Name == "RE/RegisterAttack" then
-                            return oldNM(self, -math.huge)
-                        end
-                        
-                        -- LỌC CHUẨN: Chỉ Auto Aim cho RemoteEvent/RemoteFunction phát ra từ Nhân Vật / Vũ khí đang cầm
-                        if (method == "FireServer" or method == "InvokeServer") and (self:IsA("RemoteEvent") or self:IsA("RemoteFunction")) then
-                            local char = LocalPlayer.Character
-                            -- Tránh bẻ nhầm gói tin hệ thống (di chuyển, camera) -> Gây văng/lỗi game
-                            if char and self:IsDescendantOf(char) then
-                                if self.Name ~= "RE/RegisterHit" and self.Name ~= "RE/RegisterAttack" then
-                                    local root = char:FindFirstChild("HumanoidRootPart")
-                                    if root and AllTargets[1] then
-                                        local tRoot = AllTargets[1]:FindFirstChild("HumanoidRootPart") or AllTargets[1]:FindFirstChild("UpperTorso")
-                                        if tRoot and (tRoot.Position - root.Position).Magnitude <= AUTO_AIM_RANGE then
-                                            local changed = false
-                                            for i, v in ipairs(args) do
-                                                if typeof(v) == "Vector3" then
-                                                    args[i] = tRoot.Position
-                                                    changed = true
-                                                elseif typeof(v) == "CFrame" then
-                                                    args[i] = CFrame.new(root.Position, tRoot.Position) -- Quay mặt chuẩn xác
-                                                    changed = true
-                                                end
-                                            end
-                                            if changed then return oldNM(self, unpack(args)) end
-                                        end
-                                    end
-                                end
-                            end
-                        end
-                    end
-                    return oldNM(self, ...)
-                end)
-                getgenv().Hooked = true
-            end
-        end
-    end)
-end
-
--- [2. AUTO CLICK CHO SPECIAL GUN]
-local lastClick = 0
+-- Cập nhật State liên tục cho Tool
 task.spawn(function()
-    while true do
-        task.wait() 
-        local char = workspace:FindFirstChild("Characters") and workspace.Characters:FindFirstChild(LocalPlayer.Name) or LocalPlayer.Character
+    while task.wait(0.1) do
+        local char = LocalPlayer.Character
         local tool = char and char:FindFirstChildOfClass("Tool")
-        if tool and #AllTargets > 0 then
-            local toolName = tool.Name
-            local attr = tool:GetAttribute("WeaponType")
-            if (attr == "Gun" or tool.ToolTip == "Gun" or toolName:lower():find("gun")) then
-                local Cooldown = tool:FindFirstChild("Cooldown") and tool.Cooldown.Value or 0.05
-                if tick() - lastClick > Cooldown then 
-                    lastClick = tick()
-                    pcall(function()
-                        local firstTarget = AllTargets[1]
-                        if firstTarget and firstTarget.Parent and firstTarget:FindFirstChild("Humanoid") and firstTarget.Humanoid.Health > 0 then
-                            -- Nếu quái trong tầm 350m thì Auto Aim ngắm thẳng, nếu xa hơn thì ngắm bừa
-                            local tPart = firstTarget:FindFirstChild("HumanoidRootPart") or firstTarget:FindFirstChild("UpperTorso")
-                            local TargetPos = tPart.Position
-                            local ShootType = SpecialShoots[toolName] or "Normal"
-
-                            if ShootType ~= "Normal" then
-                                local v9, v7 = GetValidator2()
-                                if v9 then GunValidator:FireServer(v9, v7) end
-                                
-                                if ShootType == "TAP" and tool:FindFirstChild("RemoteEvent") then
-                                    tool.RemoteEvent:FireServer("TAP", TargetPos)
-                                elseif ShootType == "Position" then
-                                    game:GetService("ReplicatedStorage").Modules.Net["RE/ShootGunEvent"]:FireServer(TargetPos)
-                                elseif ShootType == "Overheat" then
-                                    game:GetService("ReplicatedStorage").Modules.Net["RE/ShootGunEvent"]:FireServer(TargetPos)
-                                end
-                            else
-                                local act = tool:FindFirstChild("Activated")
-                                if act and act:IsA("BindableEvent") then act:Fire() end
-                                pcall(function() tool:Activate() end)
-                            end
-
-                            if tool:FindFirstChild("MousePos") then
-                                tool.MousePos.Value = TargetPos
-                            end
-                        end
-                    end)
-                end
-            end
+        if tool then
+            pcall(function()
+                tool:SetAttribute("AttackCooldown", 0)
+                tool:SetAttribute("LastAttack", 0)
+                tool:SetAttribute("State", 0) 
+            end)
         end
     end
 end)
 
--- [3. LOGIC TẤN CÔNG LAN LUỒNG X3 - CHUẨN XÁC]
+-- [3. LOGIC TẤN CÔNG LAN LUỒNG X3 - ĐÃ TÁCH BIỆT MELEE VÀ BLOX FRUIT]
 local lastAttackTick = 0
-local lastLeftClickTick = 0 
 local ATTACK_DELAY = 0.12 
-local LEFT_CLICK_DELAY = 0.2 -- Tách nhịp vung tay (LeftClickRemote) riêng để chống kẹt Client
 
 task.spawn(function()
     while true do
@@ -330,12 +274,13 @@ task.spawn(function()
         if tick() - lastAttackTick < ATTACK_DELAY then continue end
         lastAttackTick = tick()
 
-        ExtremeBypass(tool)
         FastAttack() 
 
         local toolName = tool.Name:lower()
         local isGuitar = toolName:find("guitar")
-        local isAnyGun = (tool:GetAttribute("WeaponType") == "Gun") or (tool.ToolTip == "Gun") or isGuitar
+        local toolTip = tool.ToolTip
+        local isAnyGun = (tool:GetAttribute("WeaponType") == "Gun") or (toolTip == "Gun") or isGuitar
+        local isFruit = (toolTip == "Blox Fruit")
 
         local unbanID_base = tostring(LocalPlayer.UserId):sub(2,4)..tostring(coroutine.running()):sub(11,15)
 
@@ -354,24 +299,27 @@ task.spawn(function()
                         end
                         
                         if #fullHitList > 0 then
-                            -- Xả Hit liên tục x3
                             regHit:FireServer(fullHitList[1][2], fullHitList, nil, nil, unbanID)
                             
-                            -- FIX KẸT MELEE/SWORD/BLOX FRUIT: Gọi LeftClickRemote độc lập có Delay
+                            -- CHỈ LUỒNG ĐẦU MỚI GỬI LỆNH ĐỂ TRÁNH QUÁ TẢI (KẸT LAG PING)
                             if i == 1 then
-                                regAttack:FireServer(-math.huge)
-                                if tick() - lastLeftClickTick > LEFT_CLICK_DELAY then
-                                    lastLeftClickTick = tick()
+                                -- TÁCH RIÊNG LOGIC THEO ĐÚNG Ý BẠN
+                                if isFruit then
+                                    -- Logic riêng rẽ chỉ dành cho Blox Fruit
                                     local leftClick = tool:FindFirstChild("LeftClickRemote", true)
                                     if leftClick then
                                         local lookVector = (fullHitList[1][2].Position - root.Position).Unit
                                         if lookVector ~= lookVector then lookVector = Vector3.new(0, 1, 0) end 
                                         leftClick:FireServer(lookVector, 1, unbanID_base)
                                     end
+                                else
+                                    -- Logic dành cho Melee / Sword thuần túy (Không dính LeftClickRemote)
+                                    regAttack:FireServer(-math.huge)
                                 end
                             end
                         end
                     else
+                        -- LOGIC SÚNG & GUITAR
                         local gunHitList = {}
                         local shootParts = {}
                         for j = 1, math.min(#AllTargets, 7) do
@@ -386,26 +334,17 @@ task.spawn(function()
                         end
 
                         if #gunHitList > 0 then
+                            local targetPos = gunHitList[1][2].Position
                             regHit:FireServer(gunHitList[1][2], gunHitList, nil, nil, unbanID)
                             
-                            if i == 1 and (tick() - lastLeftClickTick > 0.15) then
-                                lastLeftClickTick = tick()
-                                local targetPos = gunHitList[1][2].Position
-                                
+                            if i == 1 then
                                 if not isGuitar and shootGun then
-                                    local v9, v7 = GetValidator2()
-                                    if v9 then GunValidator:FireServer(v9, v7) end
                                     shootGun:FireServer(targetPos, shootParts, unbanID_base)
                                 end
-                                
-                                -- FIX GUITAR CHUẨN XÁC VÀO QUÁI
                                 if isGuitar then
+                                    -- Đã fix truyền đúng targetPos thực tế của quái
                                     local remote = tool:FindFirstChild("RemoteEvent", true)
-                                    if remote then 
-                                        local v9, v7 = GetValidator2()
-                                        if v9 then GunValidator:FireServer(v9, v7) end
-                                        remote:FireServer("TAP", targetPos, unbanID_base) 
-                                    end
+                                    if remote then remote:FireServer("TAP", targetPos, unbanID_base) end
                                 end
                             end
                         end
