@@ -1,4 +1,4 @@
--- [[ GLOBAL MAX SPEED SCRIPT: MELEE/SWORD/FRUIT & STANDALONE GUN ]]
+-- [[ GLOBAL MAX SPEED SCRIPT: MELEE/SWORD/FRUIT & STANDALONE GUN - UNLEASHED VERSION ]]
 
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
@@ -148,8 +148,6 @@ local function ExtremeBypass(tool)
     end)
 end
 
-local lastAttackTick_Melee = 0
-local ATTACK_DELAY_MELEE = 0.001 
 local FruitCombo = 1
 
 task.spawn(function()
@@ -168,9 +166,6 @@ task.spawn(function()
         
         -- Dừng nếu đang cầm súng (để cho luồng Gun xử lý)
         if isAnyGun then continue end
-
-        if tick() - lastAttackTick_Melee < ATTACK_DELAY_MELEE then continue end
-        lastAttackTick_Melee = tick()
 
         ExtremeBypass(tool)
         FastAttack() 
@@ -193,27 +188,25 @@ task.spawn(function()
         end
 
         if #HitTable > 0 and HitPart then
-            -- M1 Fruit: Kích hoạt độc lập 1 lần chống nghẽn Counter
-            if isFruit then
-                FruitCombo = FruitCombo >= 4 and 1 or FruitCombo + 1
-                local leftClick = tool:FindFirstChild("LeftClickRemote", true)
-                if leftClick then
-                    local lookVector = (HitPart.Position - root.Position).Unit
-                    if lookVector ~= lookVector then lookVector = Vector3.new(0, 1, 0) end 
-                    task.spawn(function()
-                        pcall(function() leftClick:FireServer(lookVector, FruitCombo, unbanID_base) end)
-                    end)
-                end
-            end
-
-            -- Đẩy Hit lên Server tốc độ bàn thờ với cấu trúc Mảng chuẩn
-            for i = 1, 3 do 
+            -- Nâng cấp vòng lặp bắn mảng lên x5 cho tốc độ siêu nhanh hết cỡ
+            for i = 1, 5 do 
                 task.spawn(function() 
                     local unbanID = unbanID_base .. i 
                     pcall(function()
                         regHit:FireServer(HitPart, HitTable, nil, nil, unbanID)
                         if not isFruit and i == 1 then
                             regAttack:FireServer(-math.huge)
+                        end
+                        
+                        -- M1 Fruit: Kích hoạt liên tục ngay trong vòng lặp x5 để đồng bộ gói tin, không bao giờ lo chậm hơn kiếm
+                        if isFruit then
+                            FruitCombo = FruitCombo >= 4 and 1 or FruitCombo + 1
+                            local leftClick = tool:FindFirstChild("LeftClickRemote", true) or tool:FindFirstChild("RemoteEvent", true)
+                            if leftClick then
+                                local lookVector = (HitPart.Position - root.Position).Unit
+                                if lookVector ~= lookVector then lookVector = Vector3.new(0, 1, 0) end 
+                                leftClick:FireServer(lookVector, FruitCombo, unbanID)
+                            end
                         end
                     end)
                 end)
@@ -258,8 +251,7 @@ local function GetValidator2()
     return math.floor(v9 / v4 * 16777215), v7
 end
 
--- Vòng lặp Auto Click đặc thù của súng
-local lastClick_Gun = 0
+-- Vòng lặp Auto Click đặc thù của súng (Đã loại bỏ hoàn toàn VIM chuột ảo để tối đa hóa nhịp click)
 task.spawn(function()
     while task.wait() do
         local char = workspace:FindFirstChild("Characters") and workspace.Characters:FindFirstChild(LocalPlayer.Name) or LocalPlayer.Character
@@ -270,56 +262,43 @@ task.spawn(function()
             local isAnyGun = (tool:GetAttribute("WeaponType") == "Gun") or (tool.ToolTip == "Gun") or toolNameLower:find("gun") or toolNameLower:find("dragonstorm")
             
             if isAnyGun then
-                local Cooldown = tool:FindFirstChild("Cooldown") and tool.Cooldown.Value or 0.05
-                local ShootType = SpecialShoots[toolName] or "Normal"
+                pcall(function()
+                    local firstTarget = AllTargets[1]
+                    if firstTarget and firstTarget:FindFirstChild("Humanoid") and firstTarget.Humanoid.Health > 0 then
+                        local tPart = firstTarget:FindFirstChild("Head") or firstTarget:FindFirstChild("HumanoidRootPart")
+                        if not tPart then return end
+                        
+                        local TargetPos = tPart.Position
+                        local ShootType = SpecialShoots[toolName] or "Normal"
 
-                if ShootType == "Overheat" or toolNameLower:find("dragonstorm") then Cooldown = 0 end
-
-                if tick() - lastClick_Gun > Cooldown then 
-                    lastClick_Gun = tick()
-                    pcall(function()
-                        local firstTarget = AllTargets[1]
-                        if firstTarget and firstTarget:FindFirstChild("Humanoid") and firstTarget.Humanoid.Health > 0 then
-                            local tPart = firstTarget:FindFirstChild("Head") or firstTarget:FindFirstChild("HumanoidRootPart")
-                            if not tPart then return end
+                        if ShootType ~= "Normal" then
+                            local v9, v7 = GetValidator2()
+                            if v9 and GunValidator then GunValidator:FireServer(v9, v7) end
                             
-                            local TargetPos = tPart.Position
-
-                            if ShootType ~= "Normal" then
-                                local v9, v7 = GetValidator2()
-                                if v9 and GunValidator then GunValidator:FireServer(v9, v7) end
-                                
-                                if ShootType == "TAP" and tool:FindFirstChild("RemoteEvent") then
-                                    tool.RemoteEvent:FireServer("TAP", TargetPos)
-                                elseif ShootType == "Position" and shootGun then
-                                    shootGun:FireServer(TargetPos)
-                                elseif ShootType == "Overheat" and shootGun then
-                                    local unbanID = tostring(LocalPlayer.UserId):sub(2,4)..tostring(coroutine.running()):sub(11,15).."1"
-                                    shootGun:FireServer(TargetPos, {tPart}, unbanID)
-                                    pcall(function() tool:Activate() end)
-                                end
-                            else
-                                local rx, ry = math.random(1, 5), math.random(1, 5)
-                                VIM:SendMouseButtonEvent(rx, ry, 0, true, game, 0)
-                                VIM:SendMouseButtonEvent(rx, ry, 0, false, game, 0)
-                                local act = tool:FindFirstChild("Activated")
-                                if act and act:IsA("BindableEvent") then act:Fire() end
-                                pcall(function() tool:Activate() end)
+                            if ShootType == "TAP" and tool:FindFirstChild("RemoteEvent") then
+                                tool.RemoteEvent:FireServer("TAP", TargetPos)
+                            elseif ShootType == "Position" and shootGun then
+                                shootGun:FireServer(TargetPos)
+                            elseif ShootType == "Overheat" and shootGun then
+                                local unbanID = tostring(LocalPlayer.UserId):sub(2,4)..tostring(coroutine.running()):sub(11,15).."1"
+                                shootGun:FireServer(TargetPos, {tPart}, unbanID)
+                                tool:Activate()
                             end
-
-                            if tool:FindFirstChild("MousePos") then tool.MousePos.Value = TargetPos end
+                        else
+                            -- Súng thường: Bypass VIM click chuột ảo, trực tiếp kích hoạt vũ khí và phát hỏa qua Remote
+                            if shootGun then shootGun:FireServer(TargetPos, {tPart}, tostring(LocalPlayer.UserId)) end
+                            tool:Activate()
                         end
-                    end)
-                end
+
+                        if tool:FindFirstChild("MousePos") then tool.MousePos.Value = TargetPos end
+                    end
+                end)
             end
         end
     end
 end)
 
--- Luồng Giga Speed x3 cho Súng
-local lastAttackTick_Gun = 0
-local ATTACK_DELAY_GUN = 0.01
-
+-- Luồng Giga Speed x5 cho Súng
 task.spawn(function()
     while true do
         RunService.Heartbeat:Wait() 
@@ -336,17 +315,10 @@ task.spawn(function()
         
         if not isAnyGun then continue end 
         
-        local ShootType = SpecialShoots[toolName] or "Normal"
-        local currentDelay = ATTACK_DELAY_GUN
-        
-        if ShootType == "Overheat" or toolNameLower:find("dragonstorm") then currentDelay = 0 end
-
-        if tick() - lastAttackTick_Gun < currentDelay then continue end
-        lastAttackTick_Gun = tick()
-
         local unbanID_base = tostring(LocalPlayer.UserId):sub(2,4)..tostring(coroutine.running()):sub(11,15)
 
-        for i = 1, 3 do 
+        -- Ép xung x5 luồng sấy đạn cho Súng
+        for i = 1, 5 do 
             task.spawn(function() 
                 local unbanID = unbanID_base .. i 
                 pcall(function()
@@ -371,6 +343,7 @@ task.spawn(function()
                         regHit:FireServer(gunHitList[1][2], gunHitList, nil, nil, unbanID)
                         
                         if i == 1 then
+                            local ShootType = SpecialShoots[toolName] or "Normal"
                             if isGuitar then
                                 local remote = tool:FindFirstChild("RemoteEvent", true)
                                 if remote then remote:FireServer("TAP", targetPos, unbanID_base) end
@@ -383,7 +356,6 @@ task.spawn(function()
                     end
                 end)
             end)
-            task.wait(0.01) 
         end
     end
 end)
