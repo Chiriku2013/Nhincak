@@ -1,4 +1,4 @@
--- [[ MELEE / SWORD / FRUIT ONLY LOGIC ]]
+-- [[ MELEE / SWORD / FRUIT ONLY LOGIC - GLOBAL MAX SPEED ]]
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 local RunService = game:GetService("RunService")
@@ -111,14 +111,21 @@ repeat
     end)
 until Net and regHit and regAttack
 
--- [ BYPASS ]
+-- [ BYPASS CLICK DELAY TẬN GỐC CHO FRUIT ]
 local oldNM = nil
 local function ExtremeBypass(tool)
     pcall(function()
         if tool:IsA("Tool") then
+            -- Mở khóa toàn bộ thuộc tính giới hạn tốc độ bấm cục bộ của Tool
             tool:SetAttribute("AttackCooldown", 0)
             tool:SetAttribute("LastAttack", 0)
             tool:SetAttribute("State", 0) 
+            tool:SetAttribute("Combo", 1)
+            
+            -- Gỡ bỏ tận gốc delay nội bộ nếu trái ác quỷ lưu cấu hình bằng biến hoặc cấu trúc cũ
+            if tool:FindFirstChild("ClickDelay") then tool.ClickDelay.Value = 0 end
+            if tool:FindFirstChild("Cooldown") then tool.Cooldown.Value = 0 end
+
             if not getgenv().HookedMelee then
                 oldNM = hookmetamethod(game, "__namecall", function(self, ...)
                     if getnamecallmethod() == "FireServer" and self.Name == "RE/RegisterAttack" and oldNM then
@@ -134,11 +141,8 @@ end
 
 -- [ GIGA SPEED MELEE / SWORD / FRUIT LOOP ]
 local lastAttackTick = 0
-local ATTACK_DELAY = 0.01
-
--- M1 Combo
-local FruitCombo = 0
-local ComboDebounce = 0
+local ATTACK_DELAY = 0.001 -- Đẩy delay về tiệm cận 0 giống cơ chế script Control
+local FruitCombo = 1
 
 task.spawn(function()
     while true do
@@ -154,7 +158,6 @@ task.spawn(function()
         local isAnyGun = (tool:GetAttribute("WeaponType") == "Gun") or (tool.ToolTip == "Gun") or isGuitar
         local isFruit = (tool.ToolTip == "Blox Fruit")
         
-        -- NẾU LÀ SÚNG THÌ BỎ QUA, KHÔNG CHẠY LOGIC NÀY
         if isAnyGun then continue end
 
         if tick() - lastAttackTick < ATTACK_DELAY then continue end
@@ -165,21 +168,24 @@ task.spawn(function()
 
         local unbanID_base = tostring(LocalPlayer.UserId):sub(2,4)..tostring(coroutine.running()):sub(11,15)
 
-        for i = 1, 3 do 
-            task.spawn(function() 
-                local unbanID = unbanID_base .. i 
-                pcall(function()
-                    local fullHitList = {}
-                    for j = 1, math.min(#AllTargets, 10) do
-                        local monster = AllTargets[j]
-                        if monster and monster.Parent and monster:FindFirstChild("Humanoid") and monster.Humanoid.Health > 0 then
-                            local part = monster:FindFirstChild("UpperTorso") or monster:FindFirstChild("Head")
-                            if part then table.insert(fullHitList, {monster, part}) end
-                        end
-                    end
-                    
-                    if #fullHitList > 0 then
-                        -- Giữ nguyên Logic Bypass RegisterHit
+        local fullHitList = {}
+        for j = 1, math.min(#AllTargets, 10) do
+            local monster = AllTargets[j]
+            if monster and monster.Parent and monster:FindFirstChild("Humanoid") and monster.Humanoid.Health > 0 then
+                local part = monster:FindFirstChild("UpperTorso") or monster:FindFirstChild("Head")
+                if part then table.insert(fullHitList, {monster, part}) end
+            end
+        end
+
+        if #fullHitList > 0 then
+            -- Tăng tiến Combo tự động chạy vòng lặp để đánh lừa Engine hoạt ảnh của game
+            FruitCombo = FruitCombo >= 4 and 1 or FruitCombo + 1
+
+            for i = 1, 3 do 
+                task.spawn(function() 
+                    local unbanID = unbanID_base .. i 
+                    pcall(function()
+                        -- Gây sát thương gốc lên server cực hạn
                         regHit:FireServer(fullHitList[1][2], fullHitList, nil, nil, unbanID)
                         
                         if isFruit then
@@ -188,25 +194,17 @@ task.spawn(function()
                                 local lookVector = (fullHitList[1][2].Position - root.Position).Unit
                                 if lookVector ~= lookVector then lookVector = Vector3.new(0, 1, 0) end 
                                 
-                                -- [ LOGIC COMBO M1 MAX SPEED ]
-                                local currentTime = tick()
-                                FruitCombo = (currentTime - ComboDebounce) <= 0.3 and FruitCombo or 0
-                                FruitCombo = FruitCombo >= 4 and 1 or FruitCombo + 1
-                                ComboDebounce = currentTime
-                                
-                                -- Spam liên tục ko bị giới hạn bởi i == 1 nữa
+                                -- Xả thẳng dữ liệu M1 Fruit liên tục ra Server, tự động kích hoạt Anim/Effect của chính trái đó
                                 leftClick:FireServer(lookVector, FruitCombo, unbanID_base)
                             end
                         else
-                            -- Melee/Sword attack logic
                             if i == 1 then
                                 regAttack:FireServer(-math.huge)
                             end
                         end
-                    end
+                    end)
                 end)
-            end)
-            task.wait(0.01) 
+            end
         end
     end
 end)
