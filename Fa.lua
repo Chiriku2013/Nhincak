@@ -1,14 +1,9 @@
--- [[ GLOBAL MAX SPEED SCRIPT: OVERNIGHT AFK PRO VERSION - NO FPS DROP & NO MEMORY LEAKS ]]
-
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local VIM = game:GetService("VirtualInputManager")
 
--- ==========================================
--- 1. INIT, HOOKS & ANTI-BAN
--- ==========================================
 local CurrentTool = nil
 local IsGunTool = false
 task.spawn(function()
@@ -32,12 +27,17 @@ old = hookfunction(task.delay, function(t, f, ...)
     if old then return old(t, f, ...) end
 end)
 
-pcall(function() ReplicatedStorage.Remotes.CommF_:InvokeServer("Buso") end)
+task.spawn(function()
+    pcall(function() ReplicatedStorage.Remotes.CommF_:InvokeServer("Buso") end)
+end)
+
 task.spawn(function()
     while task.wait(0.5) do
         local char = workspace:FindFirstChild("Characters") and workspace.Characters:FindFirstChild(LocalPlayer.Name) or LocalPlayer.Character
         if char and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 and not char:FindFirstChild("HasBuso") then
-            pcall(function() ReplicatedStorage.Remotes.CommF_:InvokeServer("Buso") end)
+            task.spawn(function()
+                pcall(function() ReplicatedStorage.Remotes.CommF_:InvokeServer("Buso") end)
+            end)
         end
     end
 end)
@@ -114,9 +114,6 @@ local function FastAttack()
     end)
 end
 
--- ==========================================
--- 2. QUÉT MỤC TIÊU CHUNG 
--- ==========================================
 task.spawn(function()
     while task.wait(0.1) do
         local char = LocalPlayer.Character or (workspace:FindFirstChild("Characters") and workspace.Characters:FindFirstChild(LocalPlayer.Name))
@@ -145,7 +142,6 @@ task.spawn(function()
     end
 end)
 
--- [ ĐỢI REMOTE ]
 local Net, regHit, regAttack, shootGun, GunValidator
 repeat
     task.wait(0.5)
@@ -158,9 +154,6 @@ repeat
     end)
 until Net and regHit and regAttack
 
--- ==========================================
--- 3. LUỒNG 1: MELEE / SWORD / FRUIT LOGIC (ĐÃ TỐI ƯU HÓA)
--- ==========================================
 local oldNM = nil
 local lastBypassedTool = nil
 
@@ -203,7 +196,10 @@ task.spawn(function()
         local root = char and char:FindFirstChild("HumanoidRootPart")
         local tool = char and char:FindFirstChildOfClass("Tool")
         
-        if not regHit or not regAttack or not tool or not root or #AllTargets == 0 then continue end
+        if not regHit or not regAttack or not tool or not root or #AllTargets == 0 then 
+            task.wait(0.05)
+            continue 
+        end
 
         local toolNameLower = tool.Name:lower()
         local isGuitar = toolNameLower:find("guitar")
@@ -226,7 +222,6 @@ task.spawn(function()
                 local rootP = monster:FindFirstChild("HumanoidRootPart") or monster:FindFirstChild("UpperTorso")
                 if rootP then
                     if not HitPart then HitPart = monster:FindFirstChild("Head") or rootP end
-                    -- Đẩy vào mảng theo đúng index của mảng
                     table.insert(HitTable, {monster, rootP})
                 end
             end
@@ -234,7 +229,6 @@ task.spawn(function()
 
         if #HitTable > 0 and HitPart then
             pcall(function()
-                -- Chỉ gửi 1 lần duy nhất thay vì lặp 4 lần, giúp luồng đi mượt hơn
                 if not isFruit then
                     regAttack:FireServer(-math.huge)
                 end
@@ -246,7 +240,7 @@ task.spawn(function()
                     if leftClick then
                         local lookVector = (HitPart.Position - root.Position).Unit
                         if lookVector ~= lookVector then lookVector = Vector3.new(0, 1, 0) end 
-                        FruitCombo = (FruitCombo >= 3) and 1 or (FruitCombo + 1)
+                        FruitCombo = 1
                         leftClick:FireServer(lookVector, FruitCombo, unbanID)
                     end
                 end
@@ -255,9 +249,6 @@ task.spawn(function()
     end
 end)
 
--- ==========================================
--- 4. LUỒNG 2: STANDALONE GUN LOGIC (ĐÃ TỐI ƯU HÓA)
--- ==========================================
 local SpecialShoots = {
     ["Skull Guitar"] = "TAP", 
     ["Bazooka"] = "Position", 
@@ -298,7 +289,10 @@ task.spawn(function()
         local root = char and char:FindFirstChild("HumanoidRootPart")
         local tool = char and char:FindFirstChildOfClass("Tool")
         
-        if not regHit or not tool or not root or #AllTargets == 0 then continue end
+        if not regHit or not tool or not root or #AllTargets == 0 then 
+            task.wait(0.05)
+            continue 
+        end
         
         local toolName = tool.Name
         local toolNameLower = toolName:lower()
@@ -328,12 +322,10 @@ task.spawn(function()
         if #gunHitList > 0 then
             if not targetPos then targetPos = root.Position + (root.CFrame.LookVector * 100) end
             pcall(function()
-                -- Tương tự Melee, chỉ gửi 1 gói hit duy nhất gộp nhiều quái
                 regHit:FireServer(gunHitList[1][2], gunHitList, nil, nil, unbanID)
                 
                 local ShootType = SpecialShoots[toolName] or "Normal"
                 
-                -- Bắn đạn/Skill súng
                 if isGuitar then
                     local remote = tool:FindFirstChild("RemoteEvent", true)
                     if remote then remote:FireServer("TAP", targetPos, unbanID) end
