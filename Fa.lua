@@ -1,4 +1,4 @@
--- [[ GLOBAL MAX SPEED SCRIPT: MELEE/SWORD/FRUIT & STANDALONE GUN - UNLEASHED VERSION ]]
+-- [[ GLOBAL MAX SPEED SCRIPT: OVERNIGHT AFK & BYPASS AOE LIMIT ]]
 
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
@@ -34,7 +34,7 @@ end)
 local RANGE = 1000 
 local AllTargets = {}
 
--- [ FRAMEWORK FIX ]
+-- [ TỐI ƯU FRAMEWORK CHỐNG KẸT LOGIC TREO ĐÊM ]
 local CachedFramework, LastCheckedChar, LastEquippedTool = nil, nil, nil
 local function GetFramework()
     local char = workspace:FindFirstChild("Characters") and workspace.Characters:FindFirstChild(LocalPlayer.Name) or LocalPlayer.Character
@@ -59,17 +59,21 @@ local function FastAttack()
     pcall(function()
         local ac = GetFramework()
         if ac and ac.equipped then
-            ac.hitboxMagnitude = 60 
+            ac.hitboxMagnitude = 150 
             ac.timeToNextAttack = 0
             ac.attacking = false
             ac.blocking = false 
-            ac.increment = 1 
+            ac.increment = 1 -- Khóa chặt Combo cục bộ ở nhịp 1
             ac.active = false 
             ac.focusStart = 0
             ac.currentActivity = "" 
-            if ac.animator and ac.animator.anims and ac.animator.anims.basic then
+            
+            -- Chống Nil và dọn dẹp sạch sẽ Animation thừa để không kẹt logic
+            if ac.animator and ac.animator.anims and type(ac.animator.anims.basic) == "table" then
                 for _, v in pairs(ac.animator.anims.basic) do
-                    if v.IsPlaying then v:Stop() end 
+                    if type(v) == "table" and v.IsPlaying and type(v.Stop) == "function" then 
+                        v:Stop() 
+                    end 
                 end
             end
         end
@@ -77,7 +81,7 @@ local function FastAttack()
 end
 
 -- ==========================================
--- 2. QUÉT MỤC TIÊU CHUNG (Dành cho cả 2 luồng)
+-- 2. QUÉT MỤC TIÊU CHUNG 
 -- ==========================================
 task.spawn(function()
     while task.wait(0.1) do
@@ -127,6 +131,7 @@ local oldNM = nil
 local function ExtremeBypass(tool)
     pcall(function()
         if tool:IsA("Tool") then
+            -- Tắt toàn bộ Delay
             tool:SetAttribute("AttackCooldown", 0)
             tool:SetAttribute("LastAttack", 0)
             tool:SetAttribute("State", 0) 
@@ -134,6 +139,11 @@ local function ExtremeBypass(tool)
             
             if tool:FindFirstChild("ClickDelay") then tool.ClickDelay.Value = 0 end
             if tool:FindFirstChild("Cooldown") then tool.Cooldown.Value = 0 end
+            
+            -- Bypass Reload Gun
+            if tool:FindFirstChild("Ammo") then tool.Ammo.Value = 999 end
+            if tool:FindFirstChild("MaxAmmo") then tool.MaxAmmo.Value = 999 end
+            if tool:FindFirstChild("ReloadTime") then tool.ReloadTime.Value = 0 end
 
             if not getgenv().HookedMelee then
                 oldNM = hookmetamethod(game, "__namecall", function(self, ...)
@@ -147,8 +157,6 @@ local function ExtremeBypass(tool)
         end
     end)
 end
-
-local FruitCombo = 1
 
 task.spawn(function()
     while true do
@@ -164,7 +172,6 @@ task.spawn(function()
         local isAnyGun = (tool:GetAttribute("WeaponType") == "Gun") or (tool.ToolTip == "Gun") or isGuitar or toolNameLower:find("dragonstorm")
         local isFruit = (tool.ToolTip == "Blox Fruit")
         
-        -- Dừng nếu đang cầm súng (để cho luồng Gun xử lý)
         if isAnyGun then continue end
 
         ExtremeBypass(tool)
@@ -172,11 +179,10 @@ task.spawn(function()
 
         local unbanID_base = tostring(LocalPlayer.UserId):sub(2,4)..tostring(coroutine.running()):sub(11,15)
 
-        -- Đóng gói Hit
         local HitTable = {}
         local HitPart = nil
         
-        for j = 1, math.min(#AllTargets, 10) do
+        for j = 1, math.min(#AllTargets, 12) do
             local monster = AllTargets[j]
             if monster and monster:FindFirstChild("Humanoid") and monster.Humanoid.Health > 0 then
                 local rootP = monster:FindFirstChild("HumanoidRootPart") or monster:FindFirstChild("UpperTorso")
@@ -188,24 +194,27 @@ task.spawn(function()
         end
 
         if #HitTable > 0 and HitPart then
-            -- Nâng cấp vòng lặp bắn mảng lên x5 cho tốc độ siêu nhanh hết cỡ
             for i = 1, 5 do 
                 task.spawn(function() 
                     local unbanID = unbanID_base .. i 
                     pcall(function()
-                        regHit:FireServer(HitPart, HitTable, nil, nil, unbanID)
+                        -- [ BYPASS AOE LIMIT CỰC GẮT ]
+                        -- Gửi riêng lẻ TỪNG CON QUÁI một thay vì ném cả mảng để bẻ gãy giới hạn max 2 targets của Server
+                        for _, mobData in ipairs(HitTable) do
+                            regHit:FireServer(mobData[2], {mobData}, nil, nil, unbanID)
+                        end
+                        
                         if not isFruit and i == 1 then
                             regAttack:FireServer(-math.huge)
                         end
                         
-                        -- M1 Fruit: Kích hoạt liên tục ngay trong vòng lặp x5 để đồng bộ gói tin, không bao giờ lo chậm hơn kiếm
                         if isFruit then
-                            FruitCombo = FruitCombo >= 4 and 1 or FruitCombo + 1
                             local leftClick = tool:FindFirstChild("LeftClickRemote", true) or tool:FindFirstChild("RemoteEvent", true)
                             if leftClick then
                                 local lookVector = (HitPart.Position - root.Position).Unit
                                 if lookVector ~= lookVector then lookVector = Vector3.new(0, 1, 0) end 
-                                leftClick:FireServer(lookVector, FruitCombo, unbanID)
+                                -- Bypass Combo Delay 0.7s: LUÔN ép Server nhận nhịp đánh là 1, bỏ qua đánh hất tung
+                                leftClick:FireServer(lookVector, 1, unbanID)
                             end
                         end
                     end)
@@ -251,7 +260,7 @@ local function GetValidator2()
     return math.floor(v9 / v4 * 16777215), v7
 end
 
--- Vòng lặp Auto Click đặc thù của súng (Đã loại bỏ hoàn toàn VIM chuột ảo để tối đa hóa nhịp click)
+-- Vòng lặp Activate Vũ Khí
 task.spawn(function()
     while task.wait() do
         local char = workspace:FindFirstChild("Characters") and workspace.Characters:FindFirstChild(LocalPlayer.Name) or LocalPlayer.Character
@@ -262,6 +271,7 @@ task.spawn(function()
             local isAnyGun = (tool:GetAttribute("WeaponType") == "Gun") or (tool.ToolTip == "Gun") or toolNameLower:find("gun") or toolNameLower:find("dragonstorm")
             
             if isAnyGun then
+                ExtremeBypass(tool) -- Liên tục Reset Ammo Gun
                 pcall(function()
                     local firstTarget = AllTargets[1]
                     if firstTarget and firstTarget:FindFirstChild("Humanoid") and firstTarget.Humanoid.Health > 0 then
@@ -285,7 +295,6 @@ task.spawn(function()
                                 tool:Activate()
                             end
                         else
-                            -- Súng thường: Bypass VIM click chuột ảo, trực tiếp kích hoạt vũ khí và phát hỏa qua Remote
                             if shootGun then shootGun:FireServer(TargetPos, {tPart}, tostring(LocalPlayer.UserId)) end
                             tool:Activate()
                         end
@@ -317,30 +326,33 @@ task.spawn(function()
         
         local unbanID_base = tostring(LocalPlayer.UserId):sub(2,4)..tostring(coroutine.running()):sub(11,15)
 
-        -- Ép xung x5 luồng sấy đạn cho Súng
-        for i = 1, 5 do 
-            task.spawn(function() 
-                local unbanID = unbanID_base .. i 
-                pcall(function()
-                    local gunHitList = {}
-                    local shootParts = {}
-                    local targetPos = nil 
+        local gunHitList = {}
+        local shootParts = {}
+        local targetPos = nil 
 
-                    for j = 1, math.min(#AllTargets, 10) do
-                        local monster = AllTargets[j]
-                        if monster and monster:FindFirstChild("Humanoid") and monster.Humanoid.Health > 0 then
-                            local tPart = monster:FindFirstChild("Head") or monster:FindFirstChild("HumanoidRootPart")
-                            if tPart then
-                                table.insert(gunHitList, {monster, tPart})
-                                table.insert(shootParts, tPart)
-                                if not targetPos then targetPos = tPart.Position end
-                            end
-                        end
-                    end
+        for j = 1, math.min(#AllTargets, 12) do
+            local monster = AllTargets[j]
+            if monster and monster:FindFirstChild("Humanoid") and monster.Humanoid.Health > 0 then
+                local tPart = monster:FindFirstChild("Head") or monster:FindFirstChild("HumanoidRootPart")
+                if tPart then
+                    table.insert(gunHitList, {monster, tPart})
+                    table.insert(shootParts, tPart)
+                    if not targetPos then targetPos = tPart.Position end
+                end
+            end
+        end
 
-                    if #gunHitList > 0 then
+        if #gunHitList > 0 then
+            for i = 1, 5 do 
+                task.spawn(function() 
+                    local unbanID = unbanID_base .. i 
+                    pcall(function()
                         if not targetPos then targetPos = root.Position + (root.CFrame.LookVector * 100) end
-                        regHit:FireServer(gunHitList[1][2], gunHitList, nil, nil, unbanID)
+                        
+                        -- [ BYPASS AOE LIMIT CỦA SÚNG TƯƠNG TỰ MELEE ]
+                        for _, gunData in ipairs(gunHitList) do
+                            regHit:FireServer(gunData[2], {gunData}, nil, nil, unbanID)
+                        end
                         
                         if i == 1 then
                             local ShootType = SpecialShoots[toolName] or "Normal"
@@ -353,9 +365,9 @@ task.spawn(function()
                                 if shootGun then shootGun:FireServer(targetPos, shootParts, unbanID_base) end
                             end
                         end
-                    end
+                    end)
                 end)
-            end)
+            end
         end
     end
 end)
