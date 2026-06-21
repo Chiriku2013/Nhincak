@@ -195,7 +195,6 @@ task.spawn(function()
         local tool = char and char:FindFirstChildOfClass("Tool")
         
         if not regHit or not regAttack or not tool or not root or #AllTargets == 0 then 
-            task.wait(0.05)
             continue 
         end
 
@@ -231,42 +230,30 @@ task.spawn(function()
                     regAttack:FireServer(-math.huge)
                     regHit:FireServer(HitPart, HitTable, nil, nil, unbanID)
                 else
-                    if not getgenv().IsUsingFastAttackFruit then
-                        getgenv().IsUsingFastAttackFruit = true
+                    getgenv().FruitCombo = (getgenv().FruitCombo or 0) + 1
+                    if getgenv().FruitCombo > 3 then getgenv().FruitCombo = 1 end
+                    
+                    regHit:FireServer(HitPart, HitTable, nil, nil, unbanID)
+                    
+                    local remote = tool:FindFirstChild("LeftClickRemote", true) or tool:FindFirstChild("RemoteEvent", true) or tool:FindFirstChild("Remote", true)
+                    if remote then
+                        local lookVector = (HitPart.Position - root.Position).Unit
+                        if lookVector ~= lookVector then lookVector = Vector3.new(0, 1, 0) end 
                         
+                        if remote.Name == "Remote" then
+                            remote:FireServer(Vector3.new(0,0,0), getgenv().FruitCombo)
+                        else
+                            remote:FireServer(lookVector, getgenv().FruitCombo, unbanID)
+                        end
+                    end
+                    
+                    local mainTarget = HitTable[1] and HitTable[1][1]
+                    local targetRoot = mainTarget and mainTarget:FindFirstChild("HumanoidRootPart")
+                    if targetRoot and Net then
                         task.spawn(function()
-                            local speed = getgenv().AutoBounty and getgenv().AutoBounty.Combat and getgenv().AutoBounty.Combat.FastAttackSpeed or 12
-                            for i = 1, speed do
-                                task.spawn(function()
-                                    pcall(function()
-                                        regHit:FireServer(HitPart, HitTable, nil, nil, unbanID)
-                                        
-                                        tool:Activate()
-                                        
-                                        local remote = tool:FindFirstChild("LeftClickRemote", true) or tool:FindFirstChild("RemoteEvent", true) or tool:FindFirstChild("Remote", true)
-                                        if remote then
-                                            local lookVector = (HitPart.Position - root.Position).Unit
-                                            if lookVector ~= lookVector then lookVector = Vector3.new(0, 1, 0) end 
-                                            
-                                            if remote.Name == "Remote" then
-                                                remote:FireServer(Vector3.new(0,0,0), 1)
-                                            else
-                                                remote:FireServer(lookVector, 1, unbanID)
-                                            end
-                                        end
-                                        
-                                        local mainTarget = HitTable[1] and HitTable[1][1]
-                                        local targetRoot = mainTarget and mainTarget:FindFirstChild("HumanoidRootPart")
-                                        if targetRoot and Net then
-                                            Net:InvokeServer("Attack", {
-                                                [1] = targetRoot
-                                            })
-                                        end
-                                    end)
-                                end)
-                                task.wait(0.01)
-                            end
-                            getgenv().IsUsingFastAttackFruit = false
+                            pcall(function()
+                                Net:InvokeServer("Attack", {[1] = targetRoot})
+                            end)
                         end)
                     end
                 end
@@ -316,7 +303,6 @@ task.spawn(function()
         local tool = char and char:FindFirstChildOfClass("Tool")
         
         if not regHit or not tool or not root or #AllTargets == 0 then 
-            task.wait(0.05)
             continue 
         end
         
