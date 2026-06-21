@@ -1,4 +1,4 @@
--- [[ GLOBAL MAX SPEED SCRIPT: OVERNIGHT AFK & BYPASS AOE LIMIT ]]
+-- [[ GLOBAL MAX SPEED SCRIPT: OVERNIGHT AFK, OPTIMIZED PING & AOE RESTORED ]]
 
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
@@ -34,7 +34,7 @@ end)
 local RANGE = 1000 
 local AllTargets = {}
 
--- [ TỐI ƯU FRAMEWORK CHỐNG KẸT LOGIC TREO ĐÊM ]
+-- [ TỐI ƯU FRAMEWORK CHỐNG KẸT LOGIC ]
 local CachedFramework, LastCheckedChar, LastEquippedTool = nil, nil, nil
 local function GetFramework()
     local char = workspace:FindFirstChild("Characters") and workspace.Characters:FindFirstChild(LocalPlayer.Name) or LocalPlayer.Character
@@ -63,12 +63,11 @@ local function FastAttack()
             ac.timeToNextAttack = 0
             ac.attacking = false
             ac.blocking = false 
-            ac.increment = 1 -- Khóa chặt Combo cục bộ ở nhịp 1
+            ac.increment = 1 
             ac.active = false 
             ac.focusStart = 0
             ac.currentActivity = "" 
             
-            -- Chống Nil và dọn dẹp sạch sẽ Animation thừa để không kẹt logic
             if ac.animator and ac.animator.anims and type(ac.animator.anims.basic) == "table" then
                 for _, v in pairs(ac.animator.anims.basic) do
                     if type(v) == "table" and v.IsPlaying and type(v.Stop) == "function" then 
@@ -131,7 +130,6 @@ local oldNM = nil
 local function ExtremeBypass(tool)
     pcall(function()
         if tool:IsA("Tool") then
-            -- Tắt toàn bộ Delay
             tool:SetAttribute("AttackCooldown", 0)
             tool:SetAttribute("LastAttack", 0)
             tool:SetAttribute("State", 0) 
@@ -140,7 +138,6 @@ local function ExtremeBypass(tool)
             if tool:FindFirstChild("ClickDelay") then tool.ClickDelay.Value = 0 end
             if tool:FindFirstChild("Cooldown") then tool.Cooldown.Value = 0 end
             
-            -- Bypass Reload Gun
             if tool:FindFirstChild("Ammo") then tool.Ammo.Value = 999 end
             if tool:FindFirstChild("MaxAmmo") then tool.MaxAmmo.Value = 999 end
             if tool:FindFirstChild("ReloadTime") then tool.ReloadTime.Value = 0 end
@@ -182,6 +179,7 @@ task.spawn(function()
         local HitTable = {}
         local HitPart = nil
         
+        -- Gom mảng quái (Trả lại cơ chế đánh lan)
         for j = 1, math.min(#AllTargets, 12) do
             local monster = AllTargets[j]
             if monster and monster:FindFirstChild("Humanoid") and monster.Humanoid.Health > 0 then
@@ -194,26 +192,23 @@ task.spawn(function()
         end
 
         if #HitTable > 0 and HitPart then
-            for i = 1, 5 do 
+            -- Tối ưu gói tin x4 là đủ mượt và an toàn ping, gom cả cụm vào 1 hit
+            for i = 1, 4 do 
                 task.spawn(function() 
                     local unbanID = unbanID_base .. i 
                     pcall(function()
-                        -- [ BYPASS AOE LIMIT CỰC GẮT ]
-                        -- Gửi riêng lẻ TỪNG CON QUÁI một thay vì ném cả mảng để bẻ gãy giới hạn max 2 targets của Server
-                        for _, mobData in ipairs(HitTable) do
-                            regHit:FireServer(mobData[2], {mobData}, nil, nil, unbanID)
-                        end
+                        regHit:FireServer(HitPart, HitTable, nil, nil, unbanID)
                         
                         if not isFruit and i == 1 then
                             regAttack:FireServer(-math.huge)
                         end
                         
-                        if isFruit then
+                        if isFruit and i == 1 then
                             local leftClick = tool:FindFirstChild("LeftClickRemote", true) or tool:FindFirstChild("RemoteEvent", true)
                             if leftClick then
                                 local lookVector = (HitPart.Position - root.Position).Unit
                                 if lookVector ~= lookVector then lookVector = Vector3.new(0, 1, 0) end 
-                                -- Bypass Combo Delay 0.7s: LUÔN ép Server nhận nhịp đánh là 1, bỏ qua đánh hất tung
+                                -- Bypass Combo Delay 0.7s, ép nhịp 1 để không bị hất tung
                                 leftClick:FireServer(lookVector, 1, unbanID)
                             end
                         end
@@ -271,7 +266,7 @@ task.spawn(function()
             local isAnyGun = (tool:GetAttribute("WeaponType") == "Gun") or (tool.ToolTip == "Gun") or toolNameLower:find("gun") or toolNameLower:find("dragonstorm")
             
             if isAnyGun then
-                ExtremeBypass(tool) -- Liên tục Reset Ammo Gun
+                ExtremeBypass(tool) 
                 pcall(function()
                     local firstTarget = AllTargets[1]
                     if firstTarget and firstTarget:FindFirstChild("Humanoid") and firstTarget.Humanoid.Health > 0 then
@@ -307,7 +302,7 @@ task.spawn(function()
     end
 end)
 
--- Luồng Giga Speed x5 cho Súng
+-- Luồng Giga Speed cho Súng (Tối ưu Ping)
 task.spawn(function()
     while true do
         RunService.Heartbeat:Wait() 
@@ -343,16 +338,14 @@ task.spawn(function()
         end
 
         if #gunHitList > 0 then
-            for i = 1, 5 do 
+            -- Tối ưu vòng lặp Súng x4
+            for i = 1, 4 do 
                 task.spawn(function() 
                     local unbanID = unbanID_base .. i 
                     pcall(function()
                         if not targetPos then targetPos = root.Position + (root.CFrame.LookVector * 100) end
                         
-                        -- [ BYPASS AOE LIMIT CỦA SÚNG TƯƠNG TỰ MELEE ]
-                        for _, gunData in ipairs(gunHitList) do
-                            regHit:FireServer(gunData[2], {gunData}, nil, nil, unbanID)
-                        end
+                        regHit:FireServer(gunHitList[1][2], gunHitList, nil, nil, unbanID)
                         
                         if i == 1 then
                             local ShootType = SpecialShoots[toolName] or "Normal"
